@@ -1,0 +1,24 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+SQLAlchemy==2.0.32
+alembic==1.13.2
+pydantic==2.8.2
+email-validator==2.2.0
+python-dotenv==1.0.1
+mysqlclient==2.2.4
+redis==5.0.7
+passlib[bcrypt]==1.7.4
+# Pin bcrypt to 4.0.1 (4.1.x removed __about__ causing AttributeError with passlib 1.7.4 on Windows)
+bcrypt==4.0.1
+pyjwt==2.9.0
+numpy==2.1.1
+scipy==1.13.1
+pandas==2.2.2
+# implicit==0.7.2   # Temporarily disabled on Windows (needs MSVC toolchain); see README_windows_build.md
+scikit-learn==1.5.1
+orjson==3.10.6
+requests==2.32.3
+python-multipart==0.0.9
+
+# Optional (uncomment when build tools installed):
+# implicit==0.7.2
