@@ -1,50 +1,134 @@
+############################################################
 # Root ignore for musicapp
+############################################################
 
-# Python backend
+############################
+# Python (backend & general)
+############################
+.venv/
+venv/
 backend/.venv/
 backend/venv/
+__pycache__/
 backend/__pycache__/
 backend/**/__pycache__/
 *.py[cod]
-
-# Python build / cache
+*.pyo
+*.pyd
+*.so
+.mypy_cache/
 backend/.mypy_cache/
 backend/.pytest_cache/
 backend/.ruff_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage*
 backend/.coverage
 backend/htmlcov/
+htmlcov/
 
+############################
 # Environment / secrets
+############################
+.env
+.env.*
+!*.example
 backend/.env
 backend/.env.*
+!backend/.env.example
 
-# Media uploads (keep maybe a sample README so folder tracked)
+############################
+# Media uploads (kept out of git)
+############################
 backend/app/static/audio/*
 backend/app/static/covers/*
-# Allow placeholder keep files
 !backend/app/static/audio/.gitkeep
 !backend/app/static/covers/.gitkeep
 
+############################
 # Logs
+############################
+logs/
 backend/logs/
 *.log
 
-# Alembic cache
+############################
+# Alembic cache / compiled
+############################
 backend/alembic/*.pyc
 
-# Node / Flutter already handled inside frontend
+############################
+# Flutter / Dart
+############################
+frontend/.dart_tool/
+frontend/.flutter-plugins
+frontend/.flutter-plugins-dependencies
+frontend/.packages
+frontend/coverage.lcov
+frontend/.melos_tool/
+frontend/pubspec.lock
+# (remove line above if you want to track lockfile)
 
-# OS / Editor
+############################
+# Build artifacts (any depth)
+############################
+**/build/
+build/
+dist/
+*.dill
+
+############################
+# IDE / Editor / OS
+############################
+.vscode/
+.idea/
+*.iml
 Thumbs.db
 Desktop.ini
-.vscode/
+.DS_Store
+*.swp
+*.swo
 
-# Generated build artifacts (top-level)
-**/build/
+############################
+# Node / Web (future)
+############################
+node_modules/
 
-# Ignore IDE project metadata at root
-*.iml
-.idea/
+############################
+# Misc / temp
+############################
+*.tmp
+*.temp
+*.part
+*.log
+*.bak
+*.orig
+*.rej
 
-# Misc
-.env
+############################
+# Binary / archives
+############################
+*.zip
+*.tar
+*.tar.gz
+*.tar.xz
+*.tgz
+*.7z
+*.exe
+*.dll
+*.pdb
+
+############################
+# SQLite & journals
+############################
+*.sqlite3
+*.sqlite3-journal
+
+############################
+# Keep migration versions tracked
+############################
+!backend/alembic/versions/
+
+############################################################
+# End of file
+############################################################
