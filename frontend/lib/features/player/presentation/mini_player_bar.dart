@@ -1,0 +1,133 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../application/player_providers.dart';
+import 'queue_screen.dart';
+
+class MiniPlayerBar extends ConsumerWidget {
+  const MiniPlayerBar({super.key});
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(playerControllerProvider);
+    final ctrl = ref.read(playerControllerProvider.notifier);
+    final track = state.current;
+    if (track == null) return const SizedBox.shrink();
+    final dur = Duration(milliseconds: track.durationMs);
+    final pos = state.position;
+  String fmtTime(Duration d) {
+      final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+      final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+      return '$m:$s';
+    }
+    return Material(
+      elevation: 4,
+      color: Theme.of(context).colorScheme.surface,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: InkWell(
+                onTap: () => Navigator.of(context).pushNamed('/now-playing'),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      track.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Text(fmtTime(pos), style: Theme.of(context).textTheme.bodySmall),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: SliderTheme(
+                            data: SliderTheme.of(context).copyWith(
+                              trackHeight: 3,
+                              minThumbSeparation: 0,
+                            ),
+                            child: Slider(
+                              value: pos.inMilliseconds.clamp(0, dur.inMilliseconds).toDouble(),
+                              max: dur.inMilliseconds == 0 ? 1 : dur.inMilliseconds.toDouble(),
+                              onChanged: (v) => ctrl.seek(Duration(milliseconds: v.toInt())),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(fmtTime(dur), style: Theme.of(context).textTheme.bodySmall),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            _MiniPlayerControls(state: state, ctrl: ctrl),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MiniPlayerControls extends StatelessWidget {
+  final dynamic state; // PlayerStateModel
+  final dynamic ctrl;  // PlayerController
+  const _MiniPlayerControls({required this.state, required this.ctrl});
+  @override
+  Widget build(BuildContext context) {
+    // Dùng Wrap để tự xuống hàng nếu màn hình quá hẹp / text scale lớn
+    return Wrap(
+      alignment: WrapAlignment.center,
+      spacing: 0,
+      children: [
+        _icon(context,
+            icon: Icons.shuffle,
+            color: state.shuffle ? Theme.of(context).colorScheme.primary : null,
+            onPressed: ctrl.toggleShuffle),
+        _icon(context, icon: Icons.skip_previous, onPressed: state.hasPrevious ? ctrl.previous : null),
+        _icon(context, icon: state.playing ? Icons.pause : Icons.play_arrow, onPressed: ctrl.togglePlay),
+        _icon(context, icon: Icons.skip_next, onPressed: state.hasNext ? ctrl.next : null),
+        _repeatButton(context),
+        _icon(context, icon: Icons.queue_music, onPressed: () {
+          Navigator.of(context).push(MaterialPageRoute(builder: (_) => const QueueScreen()));
+        }),
+        _icon(context, icon: Icons.close, onPressed: ctrl.stop),
+      ],
+    );
+  }
+
+  Widget _icon(BuildContext context, {required IconData icon, VoidCallback? onPressed, Color? color}) {
+    return IconButton(
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+      icon: Icon(icon, size: 22, color: color),
+      onPressed: onPressed,
+    );
+  }
+
+  Widget _repeatButton(BuildContext context) {
+    IconData icon = Icons.repeat; // default
+    Color? color;
+    switch (state.repeatMode) {
+      case RepeatMode.off:
+        icon = Icons.repeat;
+        color = null;
+        break;
+      case RepeatMode.all:
+        icon = Icons.repeat;
+        color = Theme.of(context).colorScheme.primary;
+        break;
+      case RepeatMode.one:
+        icon = Icons.repeat_one;
+        color = Theme.of(context).colorScheme.primary;
+        break;
+    }
+    return _icon(context, icon: icon, color: color, onPressed: ctrl.cycleRepeatMode);
+  }
+}

@@ -1,0 +1,50 @@
+# Root ignore for musicapp
+
+# Python backend
+backend/.venv/
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+*.py[cod]
+
+# Python build / cache
+backend/.mypy_cache/
+backend/.pytest_cache/
+backend/.ruff_cache/
+backend/.coverage
+backend/htmlcov/
+
+# Environment / secrets
+backend/.env
+backend/.env.*
+
+# Media uploads (keep maybe a sample README so folder tracked)
+backend/app/static/audio/*
+backend/app/static/covers/*
+# Allow placeholder keep files
+!backend/app/static/audio/.gitkeep
+!backend/app/static/covers/.gitkeep
+
+# Logs
+backend/logs/
+*.log
+
+# Alembic cache
+backend/alembic/*.pyc
+
+# Node / Flutter already handled inside frontend
+
+# OS / Editor
+Thumbs.db
+Desktop.ini
+.vscode/
+
+# Generated build artifacts (top-level)
+**/build/
+
+# Ignore IDE project metadata at root
+*.iml
+.idea/
+
+# Misc
+.env
