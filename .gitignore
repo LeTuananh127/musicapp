@@ -104,6 +104,7 @@ node_modules/
 *.bak
 *.orig
 *.rej
+backend_git_backup/
 
 ############################
 # Binary / archives
