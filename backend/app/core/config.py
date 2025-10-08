@@ -14,6 +14,9 @@ class Settings(BaseModel):
     model_dir: str = os.getenv("MODEL_DIR", "app/ml/artifacts")
     # optional: enable sqlite fallback quickly when MYSQL_DISABLED=1
     sqlite_fallback: bool = bool(int(os.getenv("MYSQL_DISABLED", "0")))
+    # Spotify API credentials (Client Credentials Flow)
+    spotify_client_id: str | None = os.getenv("SPOTIFY_CLIENT_ID")
+    spotify_client_secret: str | None = os.getenv("SPOTIFY_CLIENT_SECRET")
 
     model_config = {
         'protected_namespaces': ()  # allow field name model_dir without warning

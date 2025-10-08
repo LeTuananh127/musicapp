@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from .core.config import get_settings
-from .routers import recommend, tracks, health, auth, interactions, playlists
+from .routers import recommend, tracks, health, auth, interactions, playlists, spotify
 from .core.db import engine, Base
 
 settings = get_settings()
@@ -38,6 +38,7 @@ app.include_router(tracks.router)
 app.include_router(interactions.router)
 app.include_router(playlists.router)
 app.include_router(recommend.router)
+app.include_router(spotify.router)
 
 # Mount static assets (audio, covers)
 app.mount('/static', StaticFiles(directory='app/static'), name='static')
