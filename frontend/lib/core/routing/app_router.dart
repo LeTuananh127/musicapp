@@ -3,8 +3,10 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:async';
 import '../../features/browse/presentation/home_screen.dart';
+import '../../features/browse/presentation/deezer_screen.dart';
 import '../../features/recommend/presentation/recommend_screen.dart';
 import '../../features/auth/presentation/login_screen.dart';
+import '../../features/settings/presentation/settings_screen.dart';
 import '../../features/auth/application/auth_providers.dart';
 import '../../features/playlist/presentation/playlist_screen.dart';
 import '../../features/playlist/presentation/playlist_detail_screen.dart';
@@ -77,6 +79,8 @@ class AppRouter {
             builder: (context, state, child) => ShellScaffold(child: child),
             routes: [
               GoRoute(path: '/home', builder: (c, s) => const HomeScreen()),
+              GoRoute(path: '/settings', builder: (c, s) => const SettingsScreen()),
+              GoRoute(path: '/deezer', builder: (c, s) => const DeezerScreen()),
               GoRoute(path: '/recommend', builder: (c, s) => const RecommendScreen()),
               GoRoute(path: '/playlists', builder: (c, s) => const PlaylistScreen()),
               GoRoute(

@@ -2,12 +2,24 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from .core.config import get_settings
-from .routers import recommend, tracks, health, auth, interactions, playlists, spotify
+from .routers import recommend, tracks, health, auth, interactions, playlists, deezer
 from .core.db import engine, Base
 
 settings = get_settings()
 
 app = FastAPI(title=settings.app_name, debug=settings.debug)
+
+
+@app.middleware('http')
+async def log_requests(request, call_next):
+    try:
+        auth = request.headers.get('authorization')
+        print(f"[HTTP] {request.method} {request.url} Authorization: {auth}")
+    except Exception:
+        print(f"[HTTP] {request.method} {request.url} (no auth header)")
+    response = await call_next(request)
+    print(f"[HTTP] -> {response.status_code} {request.method} {request.url}")
+    return response
 
 # CORS: in dev accept any localhost/127.0.0.1 origin (any port). Tighten for prod.
 if settings.debug:
@@ -38,7 +50,8 @@ app.include_router(tracks.router)
 app.include_router(interactions.router)
 app.include_router(playlists.router)
 app.include_router(recommend.router)
-app.include_router(spotify.router)
+# Spotify integration removed — spotify router disabled
+app.include_router(deezer.router)
 
 # Mount static assets (audio, covers)
 app.mount('/static', StaticFiles(directory='app/static'), name='static')

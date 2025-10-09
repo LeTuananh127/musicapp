@@ -303,6 +303,21 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
     if (track == null) return;
     final repo = ref.read(interactionRepositoryProvider);
     final seconds = state.position.inSeconds;
+    // If previewUrl points to our Deezer proxy, send as external play
+    if (track.previewUrl != null && track.previewUrl!.contains('/deezer/stream/')) {
+      try {
+        // extract external id from URL path /deezer/stream/{id}
+        final uri = Uri.parse(track.previewUrl!);
+        final segments = uri.pathSegments;
+        String? extId;
+        final idx = segments.indexOf('stream');
+        if (idx >= 0 && idx + 1 < segments.length) extId = segments[idx + 1];
+        if (extId != null) {
+          await repo.logExternalPlay(externalTrackId: extId, seconds: seconds, completed: completed, milestone: milestone);
+        }
+      } catch (_) {}
+      return;
+    }
     try {
       await repo.logPlay(trackId: int.tryParse(track.id) ?? 0, seconds: seconds, completed: completed, milestone: milestone);
       _loggedTrackId ??= int.tryParse(track.id);

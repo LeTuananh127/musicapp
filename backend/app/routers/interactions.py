@@ -10,16 +10,18 @@ router = APIRouter(prefix="/interactions", tags=["interactions"])
 auth_scheme = HTTPBearer()
 
 class InteractionCreate(BaseModel):
-    track_id: int
+    track_id: int | None = None
     seconds_listened: int
     is_completed: bool = False
     device: str | None = None
     context_type: str | None = None
     milestone: int | None = None  # 25,50,75,100 (percentage milestones)
+    external_track_id: str | None = None
 
 class InteractionOut(BaseModel):
     id: int
-    track_id: int
+    track_id: int | None = None
+    external_track_id: str | None = None
     seconds_listened: int
     is_completed: bool
     milestone: int | None = None
@@ -35,12 +37,42 @@ def get_current_user_id(cred: HTTPAuthorizationCredentials = Depends(auth_scheme
 
 @router.post('/', response_model=InteractionOut)
 def create_interaction(payload: InteractionCreate, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
-    track = db.query(Track).filter(Track.id == payload.track_id).first()
-    if not track:
-        raise HTTPException(status_code=404, detail="Track not found")
+    # If an internal track_id is provided, validate it. Otherwise allow external_track_id.
+    if payload.track_id is not None:
+        track = db.query(Track).filter(Track.id == payload.track_id).first()
+        if not track:
+            raise HTTPException(status_code=404, detail="Track not found")
     interaction = Interaction(
         user_id=user_id,
         track_id=payload.track_id,
+        external_track_id=payload.external_track_id,
+        seconds_listened=payload.seconds_listened,
+        is_completed=payload.is_completed,
+        device=payload.device,
+        context_type=payload.context_type,
+        milestone=payload.milestone,
+    )
+    db.add(interaction)
+    db.commit()
+    db.refresh(interaction)
+    return interaction
+
+
+class ExternalInteractionCreate(BaseModel):
+    external_track_id: str
+    seconds_listened: int
+    is_completed: bool = False
+    device: str | None = None
+    context_type: str | None = None
+    milestone: int | None = None
+
+
+@router.post('/external', response_model=InteractionOut)
+def create_external_interaction(payload: ExternalInteractionCreate, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    # Create interaction referencing external provider id (e.g., Deezer preview id)
+    interaction = Interaction(
+        user_id=user_id,
+        external_track_id=payload.external_track_id,
         seconds_listened=payload.seconds_listened,
         is_completed=payload.is_completed,
         device=payload.device,
