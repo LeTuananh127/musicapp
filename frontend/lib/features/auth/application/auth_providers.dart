@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../../core/config/app_env.dart';
 import '../../../shared/providers/dio_provider.dart';
+import '../../../data/repositories/interaction_repository.dart';
 import '../data/auth_repository.dart';
 
 const _kTokenKey = 'auth_token';
@@ -57,7 +58,11 @@ class AuthController extends StateNotifier<AuthState> {
   String? displayName;
   final me = await repo.me(res.token);
   if (me != null) displayName = me['display_name'] as String?;
-  state = AuthState(token: res.token, userId: res.userId, loading: false, displayName: displayName);
+      state = AuthState(token: res.token, userId: res.userId, loading: false, displayName: displayName);
+      // Flush any queued interactions now that we have a valid token
+      try {
+        await ref.read(interactionRepositoryProvider).flushQueue();
+      } catch (_) {}
       return true;
     } catch (e) {
       state = state.copyWith(loading: false, error: e.toString());
@@ -76,7 +81,11 @@ class AuthController extends StateNotifier<AuthState> {
   String? displayName;
   final me = await repo.me(res.token);
   if (me != null) displayName = me['display_name'] as String?;
-  state = AuthState(token: res.token, userId: res.userId, loading: false, displayName: displayName);
+      state = AuthState(token: res.token, userId: res.userId, loading: false, displayName: displayName);
+      // Flush queued interactions after register
+      try {
+        await ref.read(interactionRepositoryProvider).flushQueue();
+      } catch (_) {}
       return true;
     } catch (e) {
       state = state.copyWith(loading: false, error: e.toString());

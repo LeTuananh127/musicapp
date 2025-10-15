@@ -7,6 +7,7 @@ import '../../player/application/player_providers.dart';
 import '../../playlist/application/playlist_providers.dart';
 import '../../../data/repositories/track_repository.dart';
 import '../../../shared/providers/dio_provider.dart';
+import 'package:go_router/go_router.dart';
 
 // Tracks provider to avoid refetch on every rebuild
 final homeTracksProvider = FutureProvider.autoDispose((ref) async {
@@ -38,6 +39,16 @@ class HomeScreen extends ConsumerWidget {
                 ref.read(playerControllerProvider.notifier).playQueue(tracks, 0);
               });
             },
+          ),
+          IconButton(
+            tooltip: 'Deezer',
+            icon: const Icon(Icons.cloud),
+            onPressed: () => context.go('/deezer'),
+          ),
+          IconButton(
+            tooltip: 'Cài đặt',
+            icon: const Icon(Icons.settings),
+            onPressed: () => context.go('/settings'),
           ),
         ],
       ),

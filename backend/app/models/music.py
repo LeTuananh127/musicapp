@@ -68,7 +68,10 @@ class Interaction(Base):
     __tablename__ = 'interactions'
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
-    track_id: Mapped[int] = mapped_column(ForeignKey('tracks.id'))
+    # internal track id (nullable when recording external plays)
+    track_id: Mapped[int | None] = mapped_column(ForeignKey('tracks.id'), nullable=True)
+    # external_track_id for plays originating from external providers (e.g., Deezer preview id)
+    external_track_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     played_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, index=True)
     seconds_listened: Mapped[int] = mapped_column(Integer, default=0)
     is_completed: Mapped[bool] = mapped_column(Boolean, default=False)
