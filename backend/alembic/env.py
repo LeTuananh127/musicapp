@@ -5,6 +5,14 @@ from sqlalchemy import engine_from_config, pool
 from alembic import context
 
 # Import models for autogenerate
+import os
+import sys
+
+# Ensure project root (backend/) is on sys.path so alembic env imports 'app'
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
 from app.core.config import get_settings
 from app.core.db import Base
 from app.models import music  # noqa: F401

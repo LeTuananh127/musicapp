@@ -32,6 +32,9 @@ class Track(Base):
     preview_url: Mapped[str | None] = mapped_column(String(500))
     cover_url: Mapped[str | None] = mapped_column(String(500))
     is_explicit: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Deezer / external genre info (nullable)
+    genre_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    genre_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     album: Mapped[Album | None] = relationship(back_populates='tracks')
     artist: Mapped[Artist] = relationship(back_populates='tracks')
     # Use Optional forward ref style to avoid TypeError with '|' on string literal
