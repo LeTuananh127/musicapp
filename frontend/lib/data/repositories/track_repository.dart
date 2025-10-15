@@ -27,11 +27,23 @@ class TrackRepository implements ITrackRepository {
       final list = (response.data as List)
           .map((e) {
             final rawPreview = e['preview_url'];
-            final preview = rawPreview == null
-                ? null
-                : (rawPreview.toString().startsWith('http')
-                    ? rawPreview
-                    : (base + rawPreview.toString()));
+            String? preview;
+            if (rawPreview == null) {
+              preview = null;
+            } else {
+              final rp = rawPreview.toString();
+              if (rp.startsWith('http')) {
+                // If the URL is a Deezer CDN preview (dzcdn), route through backend proxy to avoid CDN restrictions
+                if (rp.contains('cdnt-preview.dzcdn.net') || rp.contains('cdns-preview.dzcdn.net') || rp.contains('dzcdn.net')) {
+                  // Use backend proxy endpoint /deezer/stream/{id}
+                  preview = '$base/deezer/stream/${e['id']}';
+                } else {
+                  preview = rp;
+                }
+              } else {
+                preview = base + rp;
+              }
+            }
             final rawCover = e['cover_url'];
             final cover = rawCover == null
                 ? null

@@ -29,6 +29,15 @@ class AppRoot extends ConsumerWidget {
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
       routerConfig: router,
+      // Builder lets us read MediaQuery and apply a conservative textScaleFactor
+      // so typography and spacing feel appropriate on ~6.1" phones (width ~390dp).
+      builder: (context, child) {
+        final mq = MediaQuery.of(context);
+        final baseWidth = 390.0; // target logical width for 6.1" devices
+        final scale = (mq.size.width / baseWidth).clamp(0.85, 1.15);
+        // Apply a text scale factor only (keeps layout mostly intact while improving readability)
+        return MediaQuery(data: mq.copyWith(textScaleFactor: scale), child: child!);
+      },
     );
   }
 }

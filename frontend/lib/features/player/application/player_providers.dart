@@ -58,20 +58,30 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
 
   Future<void> playTrack(Track track) async {
     await _audio.stop();
-    if (track.previewUrl != null) {
-      try {
-        await _audio.setUrl(track.previewUrl!);
-        await _audio.play();
-      } catch (e) {
-        // ignore: avoid_print
-        print('Audio load failed (playTrack): ${track.previewUrl} -> $e');
-      }
-    }
-    state = PlayerStateModel(current: track, playing: true, position: Duration.zero, queue: [track], currentIndex: 0);
+
+    // Optimistically update UI to show selected track immediately, but mark playing=false
+    state = PlayerStateModel(current: track, playing: false, position: Duration.zero, queue: [track], currentIndex: 0);
     _loggedTrackId = null; // reset logging sentinel
     _logInteraction(); // initial log (0 seconds listened)
     _startTick(); // still used for milestone detection / simulation fallback
     _schedulePersist();
+
+    // Now attempt to load/play audio; only flip playing=true if successful (or simulate)
+    if (track.previewUrl == null) {
+      // simulate playback for tracks without real preview
+      state = state.copyWith(playing: true);
+      return;
+    }
+
+    try {
+      await _audio.setUrl(track.previewUrl!);
+      await _audio.play();
+      state = state.copyWith(playing: true);
+    } catch (e) {
+      // ignore: avoid_print
+      print('Audio load failed (playTrack): ${track.previewUrl} -> $e');
+      // keep playing=false; UI already shows selected track
+    }
   }
 
   Future<void> playQueue(List<Track> tracks, int startIndex) async {
@@ -88,9 +98,11 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       startIndex = 0; // current nằm ở đầu sau shuffle
     }
     final start = activeQueue[startIndex];
+
+    // Optimistically set queue/current but don't mark playing until audio loads
     state = PlayerStateModel(
       current: start,
-      playing: true,
+      playing: false,
       position: Duration.zero,
       queue: activeQueue,
       currentIndex: startIndex,
@@ -98,10 +110,18 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       shuffle: state.shuffle,
       repeatMode: state.repeatMode,
     );
-    if (start.previewUrl != null) {
-      try { await _audio.setUrl(start.previewUrl!); await _audio.play(); } catch(e){
+
+    if (start.previewUrl == null) {
+      state = state.copyWith(playing: true);
+    } else {
+      try {
+        await _audio.setUrl(start.previewUrl!);
+        await _audio.play();
+        state = state.copyWith(playing: true);
+      } catch (e) {
         // ignore: avoid_print
         print('Audio load failed (playQueue start): ${start.previewUrl} -> $e');
+        // keep playing=false
       }
     }
     _loggedTrackId = null;
@@ -136,17 +156,26 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
     }
     final nextTrack = state.queue[nextIndex];
     await _audio.stop();
-    if (nextTrack.previewUrl != null) {
-      try { await _audio.setUrl(nextTrack.previewUrl!); await _audio.play(); } catch(e){
-        // ignore: avoid_print
-        print('Audio load failed (next): ${nextTrack.previewUrl} -> $e');
-      }
-    }
-    state = state.copyWith(current: nextTrack, position: Duration.zero, playing: true, currentIndex: nextIndex);
+
+    // Optimistically set current to nextTrack; don't mark playing until load succeeds
+    state = state.copyWith(current: nextTrack, position: Duration.zero, playing: false, currentIndex: nextIndex);
     _loggedTrackId = null;
     _logInteraction();
     _startTick();
     _schedulePersist();
+
+    if (nextTrack.previewUrl == null) {
+      state = state.copyWith(playing: true);
+      return;
+    }
+    try {
+      await _audio.setUrl(nextTrack.previewUrl!);
+      await _audio.play();
+      state = state.copyWith(playing: true);
+    } catch (e) {
+      // ignore: avoid_print
+      print('Audio load failed (next): ${nextTrack.previewUrl} -> $e');
+    }
   }
 
   Future<void> previous() async {
@@ -154,33 +183,51 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
     final prevIndex = state.currentIndex - 1;
     final prevTrack = state.queue[prevIndex];
     await _audio.stop();
-    if (prevTrack.previewUrl != null) {
-      try { await _audio.setUrl(prevTrack.previewUrl!); await _audio.play(); } catch(e){
-        // ignore: avoid_print
-        print('Audio load failed (previous): ${prevTrack.previewUrl} -> $e');
-      }
-    }
-    state = state.copyWith(current: prevTrack, position: Duration.zero, playing: true, currentIndex: prevIndex);
+    // Optimistically update current
+    state = state.copyWith(current: prevTrack, position: Duration.zero, playing: false, currentIndex: prevIndex);
+    await _audio.stop();
     _loggedTrackId = null;
     _logInteraction();
     _startTick();
+
+    if (prevTrack.previewUrl == null) {
+      state = state.copyWith(playing: true);
+      return;
+    }
+    try {
+      await _audio.setUrl(prevTrack.previewUrl!);
+      await _audio.play();
+      state = state.copyWith(playing: true);
+    } catch (e) {
+      // ignore: avoid_print
+      print('Audio load failed (previous): ${prevTrack.previewUrl} -> $e');
+    }
   }
 
   Future<void> jumpTo(int index, {bool autoplay = true}) async {
     if (index < 0 || index >= state.queue.length) return;
     final track = state.queue[index];
     await _audio.stop();
-    if (track.previewUrl != null) {
-      try { await _audio.setUrl(track.previewUrl!); if (autoplay) await _audio.play(); } catch(e){
-        // ignore: avoid_print
-        print('Audio load failed (jumpTo): ${track.previewUrl} -> $e');
-      }
-    }
-    state = state.copyWith(current: track, position: Duration.zero, playing: autoplay, currentIndex: index);
+    // Optimistically set current track
+    state = state.copyWith(current: track, position: Duration.zero, playing: false, currentIndex: index);
+    await _audio.stop();
     _loggedTrackId = null;
     if (autoplay) {
       _logInteraction();
       _startTick();
+    }
+
+    if (track.previewUrl == null) {
+      if (autoplay) state = state.copyWith(playing: true);
+      return;
+    }
+    try {
+      await _audio.setUrl(track.previewUrl!);
+      if (autoplay) await _audio.play();
+      if (autoplay) state = state.copyWith(playing: true);
+    } catch (e) {
+      // ignore: avoid_print
+      print('Audio load failed (jumpTo): ${track.previewUrl} -> $e');
     }
   }
 
@@ -283,7 +330,25 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       _logInteraction();
       _tick?.cancel();
     } else {
-      state = state.copyWith(playing: true);
+      // If current track has no real preview, simulate play without touching audio
+      final cur = state.current!;
+      if (cur.previewUrl == null) {
+        state = state.copyWith(playing: true);
+        _logInteraction();
+        _startTick();
+        _schedulePersist();
+        return;
+      }
+
+      // For real audio, resume the player
+      try {
+        await _audio.play();
+        state = state.copyWith(playing: true);
+      } catch (e) {
+        // ignore: avoid_print
+        print('Error while resuming playback: $e');
+        // keep playing=false
+      }
       _logInteraction();
       _startTick();
     }
