@@ -198,12 +198,24 @@ def main():
 
         # export CSV
         if args.export_csv:
-            keys = list(output_rows[0].keys()) if output_rows else ['dzr','artist','title','status']
+            # compute union of all keys across output rows to avoid missing-field errors
+            if output_rows:
+                all_keys = []
+                seen = set()
+                for orow in output_rows:
+                    for k in orow.keys():
+                        if k not in seen:
+                            seen.add(k)
+                            all_keys.append(k)
+                keys = all_keys
+            else:
+                keys = ['dzr', 'artist', 'title', 'status']
             with open(args.export_csv, 'w', newline='', encoding='utf-8') as fh:
                 w = csv.DictWriter(fh, fieldnames=keys)
                 w.writeheader()
                 for orow in output_rows:
-                    w.writerow(orow)
+                    # ensure all keys exist (csv.DictWriter will fill missing with '')
+                    w.writerow({k: orow.get(k, '') for k in keys})
 
         print(f"Summary: rows_processed={len(rows)} created_artists={created_artists} created_albums={created_albums} created_tracks={created_tracks} failed={failed}")
     finally:

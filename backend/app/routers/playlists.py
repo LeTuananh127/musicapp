@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from ..core.db import get_db
@@ -47,6 +47,22 @@ def get_current_user_id(cred: HTTPAuthorizationCredentials = Depends(auth_scheme
         raise HTTPException(status_code=401, detail="Invalid token")
     return int(sub)
 
+
+def get_optional_user_id(request: Request) -> int | None:
+    """Try to extract bearer token from Authorization header and decode it. Return user id int or None."""
+    auth = request.headers.get('authorization')
+    if not auth:
+        return None
+    parts = auth.split()
+    if len(parts) != 2 or parts[0].lower() != 'bearer':
+        return None
+    token = parts[1]
+    sub = decode_token(token)
+    try:
+        return int(sub) if sub else None
+    except Exception:
+        return None
+
 @router.post('/', response_model=PlaylistOut)
 def create_playlist(payload: PlaylistCreate, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
     playlist = Playlist(user_id=user_id, name=payload.name, description=payload.description, is_public=payload.is_public)
@@ -60,17 +76,24 @@ def list_playlists(user_id: int = Depends(get_current_user_id), db: Session = De
     return db.query(Playlist).filter(Playlist.user_id == user_id).all()
 
 @router.get('/{playlist_id}', response_model=PlaylistWithMeta)
-def get_playlist(playlist_id: int, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
-    playlist = db.query(Playlist).filter(Playlist.id == playlist_id, Playlist.user_id == user_id).first()
+def get_playlist(playlist_id: int, user_id: int = Depends(get_optional_user_id), db: Session = Depends(get_db)):
+    # allow unauthenticated read access to public playlists; owner can always read
+    playlist = db.query(Playlist).filter(Playlist.id == playlist_id).first()
     if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    # if playlist is private, require owner
+    if not playlist.is_public and playlist.user_id != user_id:
         raise HTTPException(status_code=404, detail="Playlist not found")
     track_count = db.query(PlaylistTrack).filter(PlaylistTrack.playlist_id == playlist_id).count()
     return PlaylistWithMeta(id=playlist.id, name=playlist.name, description=playlist.description, is_public=playlist.is_public, track_count=track_count)
 
 @router.get('/{playlist_id}/tracks', response_model=list[PlaylistTrackOut])
-def playlist_tracks(playlist_id: int, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
-    owned = db.query(Playlist).filter(Playlist.id == playlist_id, Playlist.user_id == user_id).first()
-    if not owned:
+def playlist_tracks(playlist_id: int, user_id: int = Depends(get_optional_user_id), db: Session = Depends(get_db)):
+    # allow unauthenticated read access to tracks of public playlists; owner can read private playlists
+    playlist = db.query(Playlist).filter(Playlist.id == playlist_id).first()
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    if not playlist.is_public and playlist.user_id != user_id:
         raise HTTPException(status_code=404, detail="Playlist not found")
     rows = (
         db.query(PlaylistTrack, Track)

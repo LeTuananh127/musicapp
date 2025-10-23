@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from typing import Optional
 import requests
 from ..services.deezer_service import search_tracks, get_track
@@ -215,19 +215,23 @@ async def deezer_stream(track_id: int, request: Request, db: Session = Depends(g
                     # Unknown local error while proxying
                     raise HTTPException(status_code=500, detail=str(e))
 
-        # Serve cached file (stream from disk)
-        f = cached_file.open('rb')
-        def file_iter():
-            try:
-                while True:
-                    chunk = f.read(1024)
-                    if not chunk:
-                        break
-                    yield chunk
-            finally:
-                f.close()
-
-        return StreamingResponse(file_iter(), media_type='audio/mpeg')
+        # Serve cached file as a FileResponse so framework can set Content-Length
+        # and support range requests (seek) reliably for clients.
+        try:
+            return FileResponse(str(cached_file), media_type='audio/mpeg', headers={'Accept-Ranges': 'bytes'})
+        except Exception:
+            # Fallback to streaming if FileResponse fails for any reason
+            f = cached_file.open('rb')
+            def file_iter():
+                try:
+                    while True:
+                        chunk = f.read(1024)
+                        if not chunk:
+                            break
+                        yield chunk
+                finally:
+                    f.close()
+            return StreamingResponse(file_iter(), media_type='audio/mpeg')
     except HTTPException:
         raise
     except Exception as e:

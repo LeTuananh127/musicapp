@@ -31,12 +31,21 @@ class Track(Base):
     duration_ms: Mapped[int]
     preview_url: Mapped[str | None] = mapped_column(String(500))
     cover_url: Mapped[str | None] = mapped_column(String(500))
+    views: Mapped[int] = mapped_column(Integer, default=0)
     is_explicit: Mapped[bool] = mapped_column(Boolean, default=False)
     # Deezer / external genre info (nullable)
     genre_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     genre_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     album: Mapped[Album | None] = relationship(back_populates='tracks')
     artist: Mapped[Artist] = relationship(back_populates='tracks')
+    
+    @property
+    def artist_name(self) -> str | None:
+        """Convenience property so serializers can include artist name directly."""
+        try:
+            return self.artist.name if self.artist else None
+        except Exception:
+            return None
     # Use Optional forward ref style to avoid TypeError with '|' on string literal
     # Forward reference must not evaluate union at class creation; use Optional + future annotations
     features: Mapped[Optional["TrackFeatures"]] = relationship(back_populates='track', uselist=False)
@@ -97,6 +106,13 @@ class PlaylistTrack(Base):
     track_id: Mapped[int] = mapped_column(ForeignKey('tracks.id'), primary_key=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
     added_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+
+class UserPreferredArtist(Base):
+    __tablename__ = 'user_preferred_artists'
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), primary_key=True)
+    artist_id: Mapped[int] = mapped_column(ForeignKey('artists.id'), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
 class Mood(Base):
     __tablename__ = 'moods'

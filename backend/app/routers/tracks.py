@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from ..core.db import get_db
@@ -8,6 +8,8 @@ from io import BytesIO
 import struct
 import os
 from typing import List
+from sqlalchemy import or_
+from ..models.music import Artist
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from ..core.security import decode_token
 from ..schemas.music import TrackOut
@@ -183,9 +185,39 @@ def liked_tracks(db: Session = Depends(get_db), user_id: int = Depends(_current_
     rows = db.query(TrackLike.track_id).filter(TrackLike.user_id == user_id).all()
     return [r[0] for r in rows]
 
+@router.get('/search', response_model=list[TrackOut])
+async def search_tracks(q: str = Query(..., min_length=1, description='Search query'), limit: int = Query(10, ge=1, le=200), db: Session = Depends(get_db)):
+    """Search tracks by title or artist name (case-insensitive).
+
+    Returns up to `limit` matching tracks.
+    """
+    # simple ILIKE search on title and artist name
+    q_like = f"%{q}%"
+    rows = db.query(Track).join(Artist, Track.artist).filter(or_(Track.title.ilike(q_like), Artist.name.ilike(q_like))).limit(limit).all()
+    # Fallback implementation: if nothing matched via join, try title-only search
+    if not rows:
+        rows = db.query(Track).filter(Track.title.ilike(q_like)).limit(limit).all()
+    return rows
+
+
 @router.get('/{track_id}')
 def get_track(track_id: int, db: Session = Depends(get_db)):
     track = db.query(Track).filter(Track.id == track_id).first()
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
     return track
+
+
+@router.post('/{track_id}/view')
+def increment_view(track_id: int, db: Session = Depends(get_db)):
+    """Increment view counter for a track. Safe to call frequently."""
+    tr = db.query(Track).filter(Track.id == track_id).first()
+    if not tr:
+        raise HTTPException(status_code=404, detail='Track not found')
+    try:
+        tr.views = (tr.views or 0) + 1
+        db.add(tr)
+        db.commit()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"views": tr.views}
