@@ -68,12 +68,17 @@ class HomeScreen extends ConsumerWidget {
               final liked = ref.watch(likedTracksProvider).contains(trackId);
               final player = ref.watch(playerControllerProvider);
               final isCurrent = player.current?.id == t.id;
-              final playing = isCurrent && player.playing;
               Widget? coverWidget;
               if (t.coverUrl != null) {
                 final cfg = ref.read(appConfigProvider);
                 final raw = t.coverUrl!;
-                final resolved = raw.startsWith('http') ? raw : (cfg.apiBaseUrl + raw);
+                String resolved;
+                if (raw.startsWith('http')) {
+                  resolved = raw;
+                } else {
+                  final base = cfg.apiBaseUrl;
+                  resolved = '$base${raw.startsWith('/') ? '' : '/'}$raw';
+                }
                 coverWidget = ClipRRect(
                   borderRadius: BorderRadius.circular(4),
                   child: Image.network(
@@ -85,30 +90,33 @@ class HomeScreen extends ConsumerWidget {
                   ),
                 );
               }
+
               return ListTile(
+                onTap: () {
+                  if (trackId <= 0) return;
+                  // Start playback of this track in the main player (do not navigate)
+                  final ctrl = ref.read(playerControllerProvider.notifier);
+                  ctrl.playQueue(tracks, i);
+                },
                 title: Text(t.title),
                 subtitle: Text(t.artistName),
-                tileColor: isCurrent ? Colors.blue.withValues(alpha: 0.06) : null,
+                tileColor: isCurrent ? Colors.blue.withOpacity(0.06) : null,
                 leading: SizedBox(
-                  width: 140,
+                  width: 120,
                   child: Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (coverWidget != null) coverWidget, if (coverWidget != null) const SizedBox(width: 4),
-                      IconButton(
-                        icon: Icon(liked ? Icons.favorite : Icons.favorite_border, color: liked ? Colors.red : null),
-                        onPressed: () => ref.read(likedTracksProvider.notifier).toggle(trackId),
-                      ),
-                      IconButton(
-                        icon: Icon(playing ? Icons.pause_circle_filled : Icons.play_circle_fill),
-                        onPressed: () {
-                          final ctrl = ref.read(playerControllerProvider.notifier);
-                          if (!isCurrent) {
-                            // Build queue from current fetched tracks
-                            ctrl.playQueue(tracks, i);
-                          } else {
-                            ctrl.togglePlay();
-                          }
-                        },
+                      if (coverWidget != null) SizedBox(width: 48, height: 48, child: coverWidget),
+                      if (coverWidget != null) const SizedBox(width: 6),
+                      SizedBox(
+                        width: 32,
+                        height: 34,
+                        child: IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          icon: Icon(liked ? Icons.favorite : Icons.favorite_border, color: liked ? Colors.red : null, size: 20),
+                          onPressed: () => ref.read(likedTracksProvider.notifier).toggle(trackId),
+                        ),
                       ),
                     ],
                   ),

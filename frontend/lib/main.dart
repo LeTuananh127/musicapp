@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/theme/app_theme.dart';
 import 'core/routing/app_router.dart';
 import 'features/auth/application/auth_providers.dart';
+import 'features/like/application/like_providers.dart';
 
 /// Ensure the auth token is loaded from secure storage before the app starts
 /// so that Dio interceptors can attach Authorization headers on first requests.
@@ -13,6 +14,10 @@ Future<void> main() async {
   final container = ProviderContainer();
   // Load auth token (reads secure storage and updates state)
   await container.read(authControllerProvider.notifier).loadFromStorage();
+  // After auth state loaded, preload liked tracks so UI shows correct like state
+  try {
+    await container.read(likedTracksProvider.notifier).ensureLoaded();
+  } catch (_) {}
 
   runApp(UncontrolledProviderScope(container: container, child: const AppRoot()));
 }

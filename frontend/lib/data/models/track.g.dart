@@ -14,6 +14,7 @@ _$TrackImpl _$$TrackImplFromJson(Map<String, dynamic> json) => _$TrackImpl(
       albumId: json['albumId'] as String?,
       previewUrl: json['previewUrl'] as String?,
       coverUrl: json['coverUrl'] as String?,
+      views: (json['views'] as num?)?.toInt(),
     );
 
 Map<String, dynamic> _$$TrackImplToJson(_$TrackImpl instance) =>
@@ -25,4 +26,5 @@ Map<String, dynamic> _$$TrackImplToJson(_$TrackImpl instance) =>
       'albumId': instance.albumId,
       'previewUrl': instance.previewUrl,
       'coverUrl': instance.coverUrl,
+      'views': instance.views,
     };

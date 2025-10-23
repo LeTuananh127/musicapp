@@ -29,6 +29,7 @@ mixin _$Track {
   String? get albumId => throw _privateConstructorUsedError;
   String? get previewUrl => throw _privateConstructorUsedError;
   String? get coverUrl => throw _privateConstructorUsedError;
+  int? get views => throw _privateConstructorUsedError;
 
   /// Serializes this Track to a JSON map.
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
@@ -51,7 +52,8 @@ abstract class $TrackCopyWith<$Res> {
       int durationMs,
       String? albumId,
       String? previewUrl,
-      String? coverUrl});
+      String? coverUrl,
+      int? views});
 }
 
 /// @nodoc
@@ -76,6 +78,7 @@ class _$TrackCopyWithImpl<$Res, $Val extends Track>
     Object? albumId = freezed,
     Object? previewUrl = freezed,
     Object? coverUrl = freezed,
+    Object? views = freezed,
   }) {
     return _then(_value.copyWith(
       id: null == id
@@ -106,6 +109,10 @@ class _$TrackCopyWithImpl<$Res, $Val extends Track>
           ? _value.coverUrl
           : coverUrl // ignore: cast_nullable_to_non_nullable
               as String?,
+      views: freezed == views
+          ? _value.views
+          : views // ignore: cast_nullable_to_non_nullable
+              as int?,
     ) as $Val);
   }
 }
@@ -124,7 +131,8 @@ abstract class _$$TrackImplCopyWith<$Res> implements $TrackCopyWith<$Res> {
       int durationMs,
       String? albumId,
       String? previewUrl,
-      String? coverUrl});
+      String? coverUrl,
+      int? views});
 }
 
 /// @nodoc
@@ -147,6 +155,7 @@ class __$$TrackImplCopyWithImpl<$Res>
     Object? albumId = freezed,
     Object? previewUrl = freezed,
     Object? coverUrl = freezed,
+    Object? views = freezed,
   }) {
     return _then(_$TrackImpl(
       id: null == id
@@ -177,6 +186,10 @@ class __$$TrackImplCopyWithImpl<$Res>
           ? _value.coverUrl
           : coverUrl // ignore: cast_nullable_to_non_nullable
               as String?,
+      views: freezed == views
+          ? _value.views
+          : views // ignore: cast_nullable_to_non_nullable
+              as int?,
     ));
   }
 }
@@ -191,7 +204,8 @@ class _$TrackImpl extends _Track {
       required this.durationMs,
       this.albumId,
       this.previewUrl,
-      this.coverUrl})
+      this.coverUrl,
+      this.views})
       : super._();
 
   factory _$TrackImpl.fromJson(Map<String, dynamic> json) =>
@@ -213,10 +227,12 @@ class _$TrackImpl extends _Track {
   final String? previewUrl;
   @override
   final String? coverUrl;
+  @override
+  final int? views;
 
   @override
   String toString() {
-    return 'Track(id: $id, title: $title, artistName: $artistName, durationMs: $durationMs, albumId: $albumId, previewUrl: $previewUrl, coverUrl: $coverUrl)';
+    return 'Track(id: $id, title: $title, artistName: $artistName, durationMs: $durationMs, albumId: $albumId, previewUrl: $previewUrl, coverUrl: $coverUrl, views: $views)';
   }
 
   @override
@@ -234,13 +250,14 @@ class _$TrackImpl extends _Track {
             (identical(other.previewUrl, previewUrl) ||
                 other.previewUrl == previewUrl) &&
             (identical(other.coverUrl, coverUrl) ||
-                other.coverUrl == coverUrl));
+                other.coverUrl == coverUrl) &&
+            (identical(other.views, views) || other.views == views));
   }
 
   @JsonKey(includeFromJson: false, includeToJson: false)
   @override
   int get hashCode => Object.hash(runtimeType, id, title, artistName,
-      durationMs, albumId, previewUrl, coverUrl);
+      durationMs, albumId, previewUrl, coverUrl, views);
 
   /// Create a copy of Track
   /// with the given fields replaced by the non-null parameter values.
@@ -266,7 +283,8 @@ abstract class _Track extends Track {
       required final int durationMs,
       final String? albumId,
       final String? previewUrl,
-      final String? coverUrl}) = _$TrackImpl;
+      final String? coverUrl,
+      final int? views}) = _$TrackImpl;
   const _Track._() : super._();
 
   factory _Track.fromJson(Map<String, dynamic> json) = _$TrackImpl.fromJson;
@@ -287,6 +305,8 @@ abstract class _Track extends Track {
   String? get previewUrl;
   @override
   String? get coverUrl;
+  @override
+  int? get views;
 
   /// Create a copy of Track
   /// with the given fields replaced by the non-null parameter values.

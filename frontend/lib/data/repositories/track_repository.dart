@@ -6,6 +6,7 @@ import '../../shared/providers/dio_provider.dart';
 abstract class ITrackRepository {
   Future<List<Track>> fetchAll({int? limit, int? offset, String order});
   Future<Track?> getById(int id);
+  Future<void> view(int id);
 }
 
 class TrackRepository implements ITrackRepository {
@@ -22,9 +23,10 @@ class TrackRepository implements ITrackRepository {
     'order': order,
   };
   final response = await _dio.get('$baseUrl/tracks/', queryParameters: params);
-    if (response.statusCode == 200 && response.data is List) {
+    if (response.statusCode == 200) {
       final base = baseUrl;
-      final list = (response.data as List)
+      final raw = response.data is List ? response.data as List : (response.data is Map ? (response.data['value'] ?? []) as List : []);
+      final list = raw
           .map((e) {
             final rawPreview = e['preview_url'];
             String? preview;
@@ -53,10 +55,11 @@ class TrackRepository implements ITrackRepository {
             return Track(
               id: (e['id']).toString(),
               title: e['title'] ?? 'Unknown',
-              artistName: e['artist_name'] ?? (e['artist']?['name'] ?? 'Unknown'),
+              artistName: e['artist_name'] ?? e['artistName'] ?? (e['artist']?['name'] ?? 'Unknown'),
               durationMs: (e['duration_ms'] ?? (e['duration'] ?? 0) * 1000) as int,
               previewUrl: preview,
               coverUrl: cover,
+              views: (e['views'] as num?)?.toInt(),
             );
           })
           .toList();
@@ -67,9 +70,53 @@ class TrackRepository implements ITrackRepository {
 
   @override
   Future<Track?> getById(int id) async {
-    final all = await fetchAll();
-    return all.firstWhere((t) => t.id == id.toString(), orElse: () =>
-        Track(id: id.toString(), title: 'Track $id', artistName: 'N/A', durationMs: 0, previewUrl: null));
+    try {
+  final resp = await _dio.get('$baseUrl/tracks/$id');
+      if (resp.statusCode == 200 && resp.data != null) {
+        final e = resp.data;
+        final base = baseUrl;
+        final rawPreview = e['preview_url'];
+        String? preview;
+        if (rawPreview == null) {
+          preview = null;
+        } else {
+          final rp = rawPreview.toString();
+          if (rp.startsWith('http')) {
+            if (rp.contains('cdnt-preview.dzcdn.net') || rp.contains('cdns-preview.dzcdn.net') || rp.contains('dzcdn.net')) {
+              preview = '$base/deezer/stream/${e['id']}';
+            } else {
+              preview = rp;
+            }
+          } else {
+            preview = base + rp;
+          }
+        }
+        final rawCover = e['cover_url'];
+        final cover = rawCover == null
+            ? null
+            : (rawCover.toString().startsWith('http')
+                ? rawCover
+                : (base + rawCover.toString()));
+        return Track(
+          id: (e['id']).toString(),
+          title: e['title'] ?? 'Unknown',
+          artistName: e['artist_name'] ?? e['artistName'] ?? (e['artist']?['name'] ?? 'Unknown'),
+          durationMs: (e['duration_ms'] ?? (e['duration'] ?? 0) * 1000) as int,
+          previewUrl: preview,
+          coverUrl: cover,
+          views: (e['views'] as num?)?.toInt(),
+        );
+      }
+    } catch (_) {}
+    return Track(id: id.toString(), title: 'Track $id', artistName: 'N/A', durationMs: 0, previewUrl: null);
+  }
+
+  Future<void> view(int id) async {
+    try {
+      await _dio.post('$baseUrl/tracks/$id/view');
+    } catch (_) {
+      // ignore errors – viewing is best-effort
+    }
   }
 }
 

@@ -16,8 +16,15 @@ class LikeRepository implements ILikeRepository {
   @override
   Future<Set<int>> fetchLiked() async {
     final res = await _dio.get('$baseUrl/tracks/liked');
-    if (res.statusCode == 200 && res.data is Map && res.data['liked'] is List) {
-      return (res.data['liked'] as List).map((e) => int.tryParse(e.toString()) ?? 0).where((e) => e>0).toSet();
+    if (res.statusCode != 200) return {};
+    final data = res.data;
+    // Backend historically returned a raw list of ids (e.g. [1,2,3])
+    // Older client expected { liked: [...] }. Accept both shapes for compatibility.
+    if (data is List) {
+      return data.map((e) => int.tryParse(e.toString()) ?? 0).where((e) => e > 0).toSet();
+    }
+    if (data is Map && data['liked'] is List) {
+      return (data['liked'] as List).map((e) => int.tryParse(e.toString()) ?? 0).where((e) => e > 0).toSet();
     }
     return {};
   }

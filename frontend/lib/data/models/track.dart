@@ -17,6 +17,7 @@ class Track with _$Track {
     String? albumId,
     String? previewUrl,
     String? coverUrl,
+    int? views,
   }) = _Track;
 
   factory Track.fromJson(Map<String, dynamic> json) => _$TrackFromJson(json);

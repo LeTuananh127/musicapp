@@ -6,6 +6,7 @@ import 'dart:convert';
 import '../../../data/models/track.dart';
 import '../../../data/repositories/interaction_repository.dart';
 import '../../../data/repositories/track_repository.dart';
+import 'audio_error_provider.dart';
 
 enum RepeatMode { off, all, one }
 
@@ -50,7 +51,19 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
     _audio.playerStateStream.listen((ps) {
       state = state.copyWith(playing: ps.playing);
       if (ps.processingState == ProcessingState.completed) {
+        // Log completion and advance according to repeat mode
         _logInteraction(completed: true);
+        if (state.repeatMode == RepeatMode.one) {
+          // restart the same track
+          try {
+            _audio.seek(Duration.zero);
+            _audio.play();
+          } catch (_) {}
+          state = state.copyWith(position: Duration.zero, playing: true);
+        } else {
+          // move to next (handles RepeatMode.all inside next())
+          next();
+        }
       }
     });
     _hydrate();
@@ -74,10 +87,15 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
     }
 
     try {
+      // Debug: log URL being loaded
+      // ignore: avoid_print
+      print('Audio: setUrl -> ${track.previewUrl} (playTrack)');
       await _audio.setUrl(track.previewUrl!);
       await _audio.play();
       state = state.copyWith(playing: true);
     } catch (e) {
+      // set audio error for UI
+      ref.read(audioErrorProvider.notifier).state = 'Audio load failed: ${e.toString()}';
       // ignore: avoid_print
       print('Audio load failed (playTrack): ${track.previewUrl} -> $e');
       // keep playing=false; UI already shows selected track
@@ -115,10 +133,14 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       state = state.copyWith(playing: true);
     } else {
       try {
+        // Debug: log URL being loaded for queue start
+        // ignore: avoid_print
+        print('Audio: setUrl -> ${start.previewUrl} (playQueue start)');
         await _audio.setUrl(start.previewUrl!);
         await _audio.play();
         state = state.copyWith(playing: true);
       } catch (e) {
+        ref.read(audioErrorProvider.notifier).state = 'Audio load failed: ${e.toString()}';
         // ignore: avoid_print
         print('Audio load failed (playQueue start): ${start.previewUrl} -> $e');
         // keep playing=false
@@ -169,10 +191,14 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       return;
     }
     try {
+      // Debug: loading next track
+      // ignore: avoid_print
+      print('Audio: setUrl -> ${nextTrack.previewUrl} (next)');
       await _audio.setUrl(nextTrack.previewUrl!);
       await _audio.play();
       state = state.copyWith(playing: true);
     } catch (e) {
+      ref.read(audioErrorProvider.notifier).state = 'Audio load failed: ${e.toString()}';
       // ignore: avoid_print
       print('Audio load failed (next): ${nextTrack.previewUrl} -> $e');
     }
@@ -195,10 +221,14 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       return;
     }
     try {
+      // Debug: loading prev track
+      // ignore: avoid_print
+      print('Audio: setUrl -> ${prevTrack.previewUrl} (previous)');
       await _audio.setUrl(prevTrack.previewUrl!);
       await _audio.play();
       state = state.copyWith(playing: true);
     } catch (e) {
+      ref.read(audioErrorProvider.notifier).state = 'Audio load failed: ${e.toString()}';
       // ignore: avoid_print
       print('Audio load failed (previous): ${prevTrack.previewUrl} -> $e');
     }
@@ -222,10 +252,14 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       return;
     }
     try {
+      // Debug: loading jumpTo track
+      // ignore: avoid_print
+      print('Audio: setUrl -> ${track.previewUrl} (jumpTo)');
       await _audio.setUrl(track.previewUrl!);
       if (autoplay) await _audio.play();
       if (autoplay) state = state.copyWith(playing: true);
     } catch (e) {
+      ref.read(audioErrorProvider.notifier).state = 'Audio load failed: ${e.toString()}';
       // ignore: avoid_print
       print('Audio load failed (jumpTo): ${track.previewUrl} -> $e');
     }
@@ -318,8 +352,44 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
     if (cur == null) return;
     final dur = Duration(milliseconds: cur.durationMs == 0 ? 180000 : cur.durationMs);
     final clipped = position > dur ? dur : (position < Duration.zero ? Duration.zero : position);
-    state = state.copyWith(position: clipped);
-    _schedulePersist();
+    // If this is a simulated track (no preview) => update UI position
+    if (cur.previewUrl == null) {
+      state = state.copyWith(position: clipped);
+      _schedulePersist();
+      return;
+    }
+
+    // For real audio, only seek if the audio exposes a duration (seekable)
+    final audioDuration = _audio.duration;
+    if (audioDuration == null || audioDuration.inMilliseconds == 0) {
+      // stream likely not seekable (e.g., remote stream without length) -> inform user and do not update UI position
+      ref.read(audioErrorProvider.notifier).state = 'Nguồn audio không hỗ trợ seek';
+      return;
+    }
+
+    try {
+      await _audio.seek(clipped);
+      // give the audio engine a short moment to update position
+      await Future.delayed(const Duration(milliseconds: 250));
+      final actual = _audio.position;
+      // If the engine reset to start (or far from requested), consider seek unsupported
+      final diff = (actual.inMilliseconds - clipped.inMilliseconds).abs();
+      if (actual.inMilliseconds <= 1000 && clipped.inMilliseconds > 1000) {
+        // restarted from the beginning
+        ref.read(audioErrorProvider.notifier).state = 'Seek không được hỗ trợ bởi nguồn audio (về đầu).';
+        // Do not update UI position to avoid confusion; rely on positionStream to reflect reality
+        return;
+      }
+      if (diff > 2000) {
+        // too far off from requested position
+        ref.read(audioErrorProvider.notifier).state = 'Seek không chính xác (vị trí thực tế khác vị trí yêu cầu).';
+      }
+      // Update state to the actual position for consistency
+      state = state.copyWith(position: actual);
+      _schedulePersist();
+    } catch (e) {
+      ref.read(audioErrorProvider.notifier).state = 'Seek thất bại: ${e.toString()}';
+    }
   }
 
   Future<void> togglePlay() async {
@@ -361,6 +431,21 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
     state = const PlayerStateModel();
     _tick?.cancel();
     _schedulePersist();
+  }
+
+  /// Clear persisted player state from disk and stop playback immediately.
+  /// Used when logging out to avoid restoring another user's queue.
+  Future<void> clearPersisted() async {
+    try {
+      await _audio.stop();
+    } catch (_) {}
+    _tick?.cancel();
+    _persistDebounce?.cancel();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_persistKey);
+    } catch (_) {}
+    state = const PlayerStateModel();
   }
 
   Future<void> _logInteraction({bool completed = false, int? milestone}) async {

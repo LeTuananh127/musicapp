@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../application/player_providers.dart';
-import 'queue_screen.dart';
+// queue_screen not used in compact mode
 
 class MiniPlayerBar extends ConsumerWidget {
   const MiniPlayerBar({super.key});
@@ -28,7 +29,7 @@ class MiniPlayerBar extends ConsumerWidget {
           children: [
             Expanded(
               child: InkWell(
-                onTap: () => Navigator.of(context).pushNamed('/now-playing'),
+                onTap: () => context.go('/track/${track.id}'),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -81,22 +82,12 @@ class _MiniPlayerControls extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // Dùng Wrap để tự xuống hàng nếu màn hình quá hẹp / text scale lớn
-    return Wrap(
-      alignment: WrapAlignment.center,
-      spacing: 0,
+    return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        _icon(context,
-            icon: Icons.shuffle,
-            color: state.shuffle ? Theme.of(context).colorScheme.primary : null,
-            onPressed: ctrl.toggleShuffle),
         _icon(context, icon: Icons.skip_previous, onPressed: state.hasPrevious ? ctrl.previous : null),
         _icon(context, icon: state.playing ? Icons.pause : Icons.play_arrow, onPressed: ctrl.togglePlay),
         _icon(context, icon: Icons.skip_next, onPressed: state.hasNext ? ctrl.next : null),
-        _repeatButton(context),
-        _icon(context, icon: Icons.queue_music, onPressed: () {
-          Navigator.of(context).push(MaterialPageRoute(builder: (_) => const QueueScreen()));
-        }),
-        _icon(context, icon: Icons.close, onPressed: ctrl.stop),
       ],
     );
   }
@@ -111,23 +102,7 @@ class _MiniPlayerControls extends StatelessWidget {
     );
   }
 
-  Widget _repeatButton(BuildContext context) {
-    IconData icon = Icons.repeat; // default
-    Color? color;
-    switch (state.repeatMode) {
-      case RepeatMode.off:
-        icon = Icons.repeat;
-        color = null;
-        break;
-      case RepeatMode.all:
-        icon = Icons.repeat;
-        color = Theme.of(context).colorScheme.primary;
-        break;
-      case RepeatMode.one:
-        icon = Icons.repeat_one;
-        color = Theme.of(context).colorScheme.primary;
-        break;
-    }
-    return _icon(context, icon: icon, color: color, onPressed: ctrl.cycleRepeatMode);
-  }
+
 }
+
+

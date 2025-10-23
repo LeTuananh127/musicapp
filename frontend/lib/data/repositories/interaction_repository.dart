@@ -8,6 +8,7 @@ abstract class IInteractionRepository {
   Future<void> logPlay({required int trackId, required int seconds, bool completed = false, int? milestone});
   Future<void> logExternalPlay({required String externalTrackId, required int seconds, bool completed = false, int? milestone});
   Future<void> flushQueue();
+  Future<void> clearQueue();
 }
 
 class InteractionRepository implements IInteractionRepository {
@@ -40,6 +41,11 @@ class InteractionRepository implements IInteractionRepository {
   Future<void> _clearQueue() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_queueKey);
+  }
+
+  /// Public clear for client-initiated wipes (e.g., logout)
+  Future<void> clearQueue() async {
+    await _clearQueue();
   }
 
   @override

@@ -47,6 +47,12 @@ class LikedTracksController extends StateNotifier<Set<int>> {
       }
     }
   }
+
+  /// Clear local liked state (used on logout to avoid leaking previous user's likes)
+  Future<void> clear() async {
+    state = {};
+    _loaded = false;
+  }
 }
 
 // Derived provider: fetch full track objects for liked IDs (simple approach: fetchAll then filter)

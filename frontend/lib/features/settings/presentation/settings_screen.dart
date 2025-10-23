@@ -43,6 +43,12 @@ class SettingsScreen extends ConsumerWidget {
               icon: const Icon(Icons.logout),
               label: const Text('Đăng xuất'),
             ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: () => context.go('/preferred-artists'),
+              icon: const Icon(Icons.person_add_alt_1),
+              label: const Text('Nghệ sĩ yêu thích'),
+            ),
           ],
         ),
       ),
