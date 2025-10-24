@@ -81,7 +81,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                           durationMs: (e['duration_ms'] ?? e['durationMs'] ?? 180000) as int,
                         ))
                     .toList();
-                if (queue.isNotEmpty) ref.read(playerControllerProvider.notifier).playQueue(queue, 0);
+                if (queue.isNotEmpty) ref.read(playerControllerProvider.notifier).playQueue(queue, 0, origin: {'type': 'playlist', 'playlistId': playlistId});
               });
             },
             icon: const Icon(Icons.play_arrow),
@@ -240,9 +240,9 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                                                           durationMs: (e['duration_ms'] as int?) ?? 180000,
                                                         ))
                                                     .toList();
-                                                if (!isCurrent) {
+                                                  if (!isCurrent) {
                                                   final startIndex = globalIndex >= 0 ? globalIndex : 0;
-                                                  ctrl.playQueue(queue, startIndex);
+                                                  ctrl.playQueue(queue, startIndex, origin: {'type': 'playlist', 'playlistId': playlistId});
                                                 } else {
                                                   ctrl.togglePlay();
                                                 }

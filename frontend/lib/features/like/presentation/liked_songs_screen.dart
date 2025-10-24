@@ -19,7 +19,7 @@ class LikedSongsScreen extends ConsumerWidget {
               final data = ref.read(likedTracksListProvider);
               data.whenOrNull(data: (tracks) {
                 if (tracks.isEmpty) return;
-                ref.read(playerControllerProvider.notifier).playQueue(tracks, 0);
+                ref.read(playerControllerProvider.notifier).playQueue(tracks, 0, origin: {'type': 'liked'});
               });
             },
           ),
@@ -78,7 +78,7 @@ class LikedSongsScreen extends ConsumerWidget {
                         onPressed: () {
                           final ctrl = ref.read(playerControllerProvider.notifier);
                           if (!isCurrent) {
-                            ctrl.playQueue(tracks, i);
+                            ctrl.playQueue(tracks, i, origin: {'type': 'liked'});
                           } else {
                             ctrl.togglePlay();
                           }

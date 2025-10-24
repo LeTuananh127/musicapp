@@ -36,7 +36,7 @@ class HomeScreen extends ConsumerWidget {
               final asyncValue = ref.read(homeTracksProvider);
               asyncValue.whenOrNull(data: (tracks) {
                 if (tracks.isEmpty) return;
-                ref.read(playerControllerProvider.notifier).playQueue(tracks, 0);
+                ref.read(playerControllerProvider.notifier).playQueue(tracks, 0, origin: {'type': 'home'});
               });
             },
           ),
@@ -95,8 +95,8 @@ class HomeScreen extends ConsumerWidget {
                 onTap: () {
                   if (trackId <= 0) return;
                   // Start playback of this track in the main player (do not navigate)
-                  final ctrl = ref.read(playerControllerProvider.notifier);
-                  ctrl.playQueue(tracks, i);
+                    final ctrl = ref.read(playerControllerProvider.notifier);
+                    ctrl.playQueue(tracks, i, origin: {'type': 'home'});
                 },
                 title: Text(t.title),
                 subtitle: Text(t.artistName),

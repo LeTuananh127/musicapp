@@ -17,10 +17,11 @@ class PlayerStateModel {
   final List<Track> queue;
   final int currentIndex; // -1 if none
   final List<Track> originalQueue; // lưu thứ tự gốc để bỏ shuffle
+  final Map<String, dynamic>? origin;
   final bool shuffle;
   final RepeatMode repeatMode;
-  const PlayerStateModel({this.current, this.playing = false, this.position = Duration.zero, this.queue = const [], this.currentIndex = -1, this.originalQueue = const [], this.shuffle = false, this.repeatMode = RepeatMode.off});
-  PlayerStateModel copyWith({Track? current, bool? playing, Duration? position, List<Track>? queue, int? currentIndex, List<Track>? originalQueue, bool? shuffle, RepeatMode? repeatMode}) =>
+  const PlayerStateModel({this.current, this.playing = false, this.position = Duration.zero, this.queue = const [], this.currentIndex = -1, this.originalQueue = const [], this.origin, this.shuffle = false, this.repeatMode = RepeatMode.off});
+  PlayerStateModel copyWith({Track? current, bool? playing, Duration? position, List<Track>? queue, int? currentIndex, List<Track>? originalQueue, Map<String, dynamic>? origin, bool? shuffle, RepeatMode? repeatMode}) =>
       PlayerStateModel(
         current: current ?? this.current,
         playing: playing ?? this.playing,
@@ -28,6 +29,7 @@ class PlayerStateModel {
         queue: queue ?? this.queue,
         currentIndex: currentIndex ?? this.currentIndex,
         originalQueue: originalQueue ?? this.originalQueue,
+        origin: origin ?? this.origin,
         shuffle: shuffle ?? this.shuffle,
         repeatMode: repeatMode ?? this.repeatMode,
       );
@@ -69,11 +71,11 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
     _hydrate();
   }
 
-  Future<void> playTrack(Track track) async {
+  Future<void> playTrack(Track track, {Map<String, dynamic>? origin}) async {
     await _audio.stop();
 
     // Optimistically update UI to show selected track immediately, but mark playing=false
-    state = PlayerStateModel(current: track, playing: false, position: Duration.zero, queue: [track], currentIndex: 0);
+    state = PlayerStateModel(current: track, playing: false, position: Duration.zero, queue: [track], currentIndex: 0, origin: origin ?? state.origin);
     _loggedTrackId = null; // reset logging sentinel
     _logInteraction(); // initial log (0 seconds listened)
     _startTick(); // still used for milestone detection / simulation fallback
@@ -102,7 +104,7 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
     }
   }
 
-  Future<void> playQueue(List<Track> tracks, int startIndex) async {
+  Future<void> playQueue(List<Track> tracks, int startIndex, {Map<String, dynamic>? origin}) async {
     if (tracks.isEmpty || startIndex < 0 || startIndex >= tracks.length) return;
     await _audio.stop();
     final original = List<Track>.from(tracks);
@@ -125,6 +127,7 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       queue: activeQueue,
       currentIndex: startIndex,
       originalQueue: original,
+      origin: origin ?? state.origin,
       shuffle: state.shuffle,
       repeatMode: state.repeatMode,
     );
@@ -569,6 +572,7 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
                   'coverUrl': t.coverUrl,
                 })
             .toList(),
+        'origin': state.origin,
         'savedAt': DateTime.now().toIso8601String(),
       };
       await prefs.setString(_persistKey, jsonEncode(data));
@@ -625,6 +629,7 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
         orElse: () => RepeatMode.off,
       );
       final playing = map['playing'] ?? false;
+  final origin = (map['origin'] as Map<String, dynamic>?) ;
       Track? current;
       if (currentIndex >= 0 && currentIndex < queue.length) {
         current = queue[currentIndex];
@@ -638,6 +643,7 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
         shuffle: shuffle,
         repeatMode: repeatMode,
         playing: playing,
+        origin: origin ?? state.origin,
       );
       if (!playing) {
         _tick?.cancel();

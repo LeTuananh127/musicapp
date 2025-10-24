@@ -130,16 +130,20 @@ class AppRouter {
                   return PlaylistDetailScreen(playlistId: pid);
                 },
               ),
-              GoRoute(
-                path: '/track/:id',
-                builder: (c, s) {
-                  final idParam = s.pathParameters['id'];
-                  final tid = int.tryParse(idParam ?? '');
-                  if (tid == null) return const Scaffold(body: Center(child: Text('Invalid track id')));
-                  return TrackDetailScreen(trackId: tid);
-                },
-              ),
+              // Track detail intentionally omitted from shell routes so it can
+              // be displayed full-screen without the bottom navigation bar.
             ],
+          ),
+          // Track detail route is outside the ShellRoute so it appears
+          // full-screen without the bottom navigation bar.
+          GoRoute(
+            path: '/track/:id',
+            builder: (c, s) {
+              final idParam = s.pathParameters['id'];
+              final tid = int.tryParse(idParam ?? '');
+              if (tid == null) return const Scaffold(body: Center(child: Text('Invalid track id')));
+              return TrackDetailScreen(trackId: tid);
+            },
           ),
           // Fullscreen overlays outside bottom nav shell
           GoRoute(path: '/now-playing', builder: (c, s) => const NowPlayingScreen()),

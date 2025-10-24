@@ -186,17 +186,22 @@ def liked_tracks(db: Session = Depends(get_db), user_id: int = Depends(_current_
     return [r[0] for r in rows]
 
 @router.get('/search', response_model=list[TrackOut])
-async def search_tracks(q: str = Query(..., min_length=1, description='Search query'), limit: int = Query(10, ge=1, le=200), db: Session = Depends(get_db)):
+async def search_tracks(
+    q: str = Query(..., min_length=1, description='Search query'),
+    limit: int = Query(10, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
     """Search tracks by title or artist name (case-insensitive).
 
     Returns up to `limit` matching tracks.
     """
     # simple ILIKE search on title and artist name
     q_like = f"%{q}%"
-    rows = db.query(Track).join(Artist, Track.artist).filter(or_(Track.title.ilike(q_like), Artist.name.ilike(q_like))).limit(limit).all()
+    rows = db.query(Track).join(Artist, Track.artist).filter(or_(Track.title.ilike(q_like), Artist.name.ilike(q_like))).offset(offset).limit(limit).all()
     # Fallback implementation: if nothing matched via join, try title-only search
     if not rows:
-        rows = db.query(Track).filter(Track.title.ilike(q_like)).limit(limit).all()
+        rows = db.query(Track).filter(Track.title.ilike(q_like)).offset(offset).limit(limit).all()
     return rows
 
 

@@ -22,22 +22,42 @@ class TrackDetailScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(trackDetailProvider(trackId));
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Track'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/home'),
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'Home',
-            icon: const Icon(Icons.home),
-            onPressed: () => context.go('/home'),
+    return WillPopScope(
+      // Intercept system back so we always try to pop to previous route when
+      // possible; otherwise fall back to navigating to /home. This avoids a
+      // situation where the back arrow does nothing because there's no entry
+      // on the Navigator stack.
+      onWillPop: () async {
+        if (Navigator.of(context).canPop()) {
+          context.pop();
+        } else {
+          context.go('/home');
+        }
+        return false; // we handled navigation
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Track'),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            // Pop to previous route if available, otherwise go home
+            onPressed: () {
+              if (Navigator.of(context).canPop()) {
+                context.pop();
+              } else {
+                context.go('/home');
+              }
+            },
           ),
-        ],
-      ),
-      body: async.when(
+          actions: [
+            IconButton(
+              tooltip: 'Home',
+              icon: const Icon(Icons.home),
+              onPressed: () => context.go('/home'),
+            ),
+          ],
+        ),
+        body: async.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Lỗi tải track: $e')),
         data: (t) {
@@ -80,6 +100,49 @@ class TrackDetailScreen extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
+                // Top status: show where playback originated from (two lines)
+                Builder(builder: (ctx) {
+                  final origin = state.origin;
+                  if (origin == null) return const SizedBox.shrink();
+                  final type = origin['type'] as String? ?? '';
+                  String label = type;
+                  VoidCallback? onOpen;
+                  if (type == 'playlist' && origin['playlistId'] != null) {
+                    label = 'Playlist';
+                    onOpen = () => context.go('/playlists/${origin['playlistId']}');
+                  } else if (type == 'search') {
+                    label = 'Tìm kiếm';
+                    onOpen = () => context.go('/search');
+                  } else if (type == 'home') {
+                    label = 'Home';
+                    onOpen = () => context.go('/home');
+                  } else if (type == 'liked') {
+                    label = 'Đã thích';
+                    onOpen = () => context.go('/playlists');
+                  } else if (type == 'virtual') {
+                    label = origin['title'] ?? 'Gợi ý';
+                    onOpen = () => context.go('/recommend');
+                  }
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Line 1: small chip-like label
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(color: Theme.of(context).colorScheme.primary.withOpacity(0.12), borderRadius: BorderRadius.circular(8)),
+                        child: Text('Đang phát từ:', style: TextStyle(color: Theme.of(context).colorScheme.primary)),
+                      ),
+                      const SizedBox(height: 6),
+                      // Line 2: origin label with optional navigation
+                      TextButton.icon(
+                        onPressed: onOpen,
+                        icon: const Icon(Icons.link, size: 16),
+                        label: Text(label),
+                      ),
+                    ],
+                  );
+                }),
+                const SizedBox(height: 8),
                 Center(child: cover),
                 const SizedBox(height: 16),
                 Text(display.title, style: Theme.of(context).textTheme.headlineSmall, textAlign: TextAlign.center),
@@ -152,7 +215,8 @@ class TrackDetailScreen extends ConsumerWidget {
           );
         },
       ),
-    );
+    ),
+  );
   }
 
   String _fmt(Duration d) {

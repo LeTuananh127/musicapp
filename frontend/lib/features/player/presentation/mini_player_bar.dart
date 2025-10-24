@@ -28,8 +28,11 @@ class MiniPlayerBar extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Expanded(
-              child: InkWell(
-                onTap: () => context.go('/track/${track.id}'),
+        child: InkWell(
+          // Use push so the track detail is pushed onto the navigation stack.
+          // This ensures the Back button pops back to the previous screen
+          // instead of replacing the route (which could lead to Home).
+          onTap: () => context.push('/track/${track.id}'),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
