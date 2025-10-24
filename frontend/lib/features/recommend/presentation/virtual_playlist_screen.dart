@@ -113,7 +113,13 @@ class _VirtualPlaylistScreenState extends ConsumerState<VirtualPlaylistScreen> {
     final dur = Duration(milliseconds: totalMs);
     final durStr = dur.inHours > 0 ? '${dur.inHours}h ${dur.inMinutes.remainder(60)}m' : '${dur.inMinutes}m ${dur.inSeconds.remainder(60)}s';
     return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.of(context).maybePop(),
+        ),
+        title: Text(widget.title),
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -137,7 +143,7 @@ class _VirtualPlaylistScreenState extends ConsumerState<VirtualPlaylistScreen> {
                       title: Text(widget.title),
                       subtitle: Text('${_tracks.length} tracks • Public • $durStr'),
                       trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                        IconButton(
+                            IconButton(
                           icon: const Icon(Icons.play_arrow),
                           onPressed: () {
                             final queue = _shuffled.isNotEmpty
@@ -147,7 +153,7 @@ class _VirtualPlaylistScreenState extends ConsumerState<VirtualPlaylistScreen> {
                                 : _tracks
                                     .map((e) => Track(id: e['id'].toString(), title: e['title'] ?? 'Track ${e['id']}', artistName: e['artist_name'] ?? '', durationMs: (e['duration_ms'] as int?) ?? 0))
                                     .toList();
-                            if (queue.isNotEmpty) ref.read(playerControllerProvider.notifier).playQueue(queue, 0);
+                            if (queue.isNotEmpty) ref.read(playerControllerProvider.notifier).playQueue(queue, 0, origin: {'type': 'virtual', 'title': widget.title});
                           },
                         ),
                         IconButton(
@@ -188,15 +194,6 @@ class _VirtualPlaylistScreenState extends ConsumerState<VirtualPlaylistScreen> {
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                               child: Row(
                                 children: [
-                                  IconButton(
-                                    icon: const Icon(Icons.chevron_left),
-                                    onPressed: _pageIndex > 0 ? () => setState(() => _pageIndex -= 1) : null,
-                                  ),
-                                  Text('Page ${_pageIndex + 1} / ${_chunks.isEmpty ? 1 : _chunks.length}'),
-                                  IconButton(
-                                    icon: const Icon(Icons.chevron_right),
-                                    onPressed: _pageIndex < (_chunks.length - 1) ? () => setState(() => _pageIndex += 1) : null,
-                                  ),
                                   const Spacer(),
                                   IconButton(
                                     icon: const Icon(Icons.shuffle),
@@ -264,7 +261,7 @@ class _VirtualPlaylistScreenState extends ConsumerState<VirtualPlaylistScreen> {
                                           : _tracks.map((e) => Track(id: e['id'].toString(), title: e['title'] ?? 'Track ${e['id']}', artistName: e['artist_name'] ?? '', durationMs: (e['duration_ms'] as int?) ?? 0, previewUrl: e['preview_url'] as String?, coverUrl: e['cover_url'] as String?)).toList();
                                       final startIndex = globalIndex >= 0 ? globalIndex : 0;
                                       if (!isCurrent) {
-                                        ctrl.playQueue(queue, startIndex);
+                                        ctrl.playQueue(queue, startIndex, origin: {'type': 'virtual', 'title': widget.title});
                                       } else {
                                         ctrl.togglePlay();
                                       }
