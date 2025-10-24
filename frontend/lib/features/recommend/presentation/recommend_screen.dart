@@ -196,7 +196,12 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
                         ),
                         onTap: () async {
                           final passTitle = title;
-                          context.go('/virtual-playlist', extra: {'tracks': chunk, 'title': passTitle});
+                          // Use push so the virtual playlist is pushed onto the
+                          // navigation stack; the Back button will then pop
+                          // back to the recommendations screen instead of
+                          // replacing the route (which caused an automatic
+                          // redirect to /home in some cases).
+                          context.push('/virtual-playlist', extra: {'tracks': chunk, 'title': passTitle});
                         },
                       ));
                     }
