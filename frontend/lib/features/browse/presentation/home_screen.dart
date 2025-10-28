@@ -9,10 +9,10 @@ import '../../../data/repositories/track_repository.dart';
 import '../../../shared/providers/dio_provider.dart';
 import 'package:go_router/go_router.dart';
 
-// Provider lấy danh sách bài hát để tránh fetch lại mỗi lần build lại widget
+// Tracks provider to avoid refetch on every rebuild
 final homeTracksProvider = FutureProvider.autoDispose((ref) async {
   final repo = ref.watch(trackRepositoryProvider);
-  // Lấy 50 bài hát mới nhất để các bài upload gần đây xuất hiện đầu tiên
+  // Fetch newest 50 so recently uploaded tracks appear
   return repo.fetchAll(limit: 50, order: 'desc');
 });
 
@@ -30,7 +30,7 @@ class HomeScreen extends ConsumerWidget {
             onPressed: () => ref.invalidate(homeTracksProvider),
           ),
           IconButton(
-            tooltip: 'Phát tất cả',
+            tooltip: 'Play All',
             icon: const Icon(Icons.play_arrow),
             onPressed: () {
               final asyncValue = ref.read(homeTracksProvider);
@@ -38,7 +38,7 @@ class HomeScreen extends ConsumerWidget {
                 if (tracks.isEmpty) return;
                 ref
                     .read(playerControllerProvider.notifier)
-                    .playQueue(tracks, 0);
+                    .playQueue(tracks, 0, origin: {'type': 'home'});
               });
             },
           ),
@@ -71,13 +71,17 @@ class HomeScreen extends ConsumerWidget {
                       ref.watch(likedTracksProvider).contains(trackId);
                   final player = ref.watch(playerControllerProvider);
                   final isCurrent = player.current?.id == t.id;
-                  final playing = isCurrent && player.playing;
                   Widget? coverWidget;
                   if (t.coverUrl != null) {
                     final cfg = ref.read(appConfigProvider);
                     final raw = t.coverUrl!;
-                    final resolved =
-                        raw.startsWith('http') ? raw : (cfg.apiBaseUrl + raw);
+                    String resolved;
+                    if (raw.startsWith('http')) {
+                      resolved = raw;
+                    } else {
+                      final base = cfg.apiBaseUrl;
+                      resolved = '$base${raw.startsWith('/') ? '' : '/'}$raw';
+                    }
                     coverWidget = ClipRRect(
                       borderRadius: BorderRadius.circular(4),
                       child: Image.network(
@@ -90,39 +94,41 @@ class HomeScreen extends ConsumerWidget {
                       ),
                     );
                   }
+
                   return ListTile(
+                    onTap: () {
+                      if (trackId <= 0) return;
+                      // Start playback of this track in the main player (do not navigate)
+                      final ctrl = ref.read(playerControllerProvider.notifier);
+                      ctrl.playQueue(tracks, i, origin: {'type': 'home'});
+                    },
                     title: Text(t.title),
                     subtitle: Text(t.artistName),
-                    tileColor:
-                        isCurrent ? Colors.blue.withValues(alpha: 0.06) : null,
+                    tileColor: isCurrent ? Colors.blue.withOpacity(0.06) : null,
                     leading: SizedBox(
-                      width: 140,
+                      width: 120,
                       child: Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          if (coverWidget != null) coverWidget,
-                          if (coverWidget != null) const SizedBox(width: 4),
-                          IconButton(
-                            icon: Icon(
-                                liked ? Icons.favorite : Icons.favorite_border,
-                                color: liked ? Colors.red : null),
-                            onPressed: () => ref
-                                .read(likedTracksProvider.notifier)
-                                .toggle(trackId),
-                          ),
-                          IconButton(
-                            icon: Icon(playing
-                                ? Icons.pause_circle_filled
-                                : Icons.play_circle_fill),
-                            onPressed: () {
-                              final ctrl =
-                                  ref.read(playerControllerProvider.notifier);
-                              if (!isCurrent) {
-                                // Tạo hàng đợi phát nhạc mới từ danh sách bài hát hiện tại
-                                ctrl.playQueue(tracks, i);
-                              } else {
-                                ctrl.togglePlay();
-                              }
-                            },
+                          if (coverWidget != null)
+                            SizedBox(width: 48, height: 48, child: coverWidget),
+                          if (coverWidget != null) const SizedBox(width: 6),
+                          SizedBox(
+                            width: 32,
+                            height: 34,
+                            child: IconButton(
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              icon: Icon(
+                                  liked
+                                      ? Icons.favorite
+                                      : Icons.favorite_border,
+                                  color: liked ? Colors.red : null,
+                                  size: 20),
+                              onPressed: () => ref
+                                  .read(likedTracksProvider.notifier)
+                                  .toggle(trackId),
+                            ),
                           ),
                         ],
                       ),
@@ -155,7 +161,7 @@ class HomeScreen extends ConsumerWidget {
   }
 
   void _showAddToPlaylist(BuildContext context, WidgetRef ref, int trackId) {
-    // Đảm bảo danh sách bài hát đã thích được load (không bắt buộc ở đây)
+    // ensure likes loaded (not strictly needed here)
     ref.read(likedTracksProvider.notifier).ensureLoaded();
     showModalBottomSheet(
       context: context,
@@ -284,8 +290,8 @@ class _AddToPlaylistTile extends StatefulWidget {
   final String name;
   final int trackId;
   final WidgetRef ref;
-  final BuildContext parentContext; // dùng để hiển thị snackbar
-  final BuildContext sheetContext; // dùng để đóng bottom sheet
+  final BuildContext parentContext; // for snackbar
+  final BuildContext sheetContext; // for closing
   final bool alreadyIn;
   const _AddToPlaylistTile(
       {required this.playlistId,
@@ -376,21 +382,21 @@ class _AddToPlaylistTileState extends State<_AddToPlaylistTile> {
                 )
               : null,
       enabled:
-          !_loading, // Cho phép nhấn cả khi đã trong playlist để mở rộng về sau
+          !_loading, // Cho phép tap cả khi alreadyIn để no-op hoặc future enhancement
       onTap: _loading || widget.alreadyIn
           ? null
           : () async {
               setState(() => _loading = true);
               final repo = widget.ref.read(playlistRepositoryProvider);
               try {
-                // Đặt giới hạn thời gian (timeout) để tránh vòng quay vô hạn nếu server không phản hồi
+                // Fail-safe: add a timeout so UI không quay mãi nếu server im lặng
                 await repo
                     .addTrack(widget.playlistId, widget.trackId)
                     .timeout(const Duration(seconds: 10));
                 if (mounted) setState(() => _loading = false);
                 if (widget.parentContext.mounted) {
                   Navigator.pop(widget.sheetContext);
-                  // Làm mới dữ liệu playlist nếu đang mở — an toàn, chi phí thấp
+                  // invalidate playlist detail & tracks if someone đang mở (an toàn, chi phí thấp)
                   try {
                     widget.ref
                         .invalidate(playlistTracksProvider(widget.playlistId));
