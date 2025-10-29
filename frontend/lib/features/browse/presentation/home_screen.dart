@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../data/repositories/playlist_repository.dart';
 import '../../like/application/like_providers.dart';
 import '../../player/application/player_providers.dart';
+import '../../player/application/audio_error_provider.dart';
 import '../../playlist/application/playlist_providers.dart';
 import '../../../data/repositories/track_repository.dart';
 import '../../../shared/providers/dio_provider.dart';
@@ -20,6 +21,18 @@ class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Listen for audio errors from the player controller and surface them
+    // as SnackBars so tapping a track that can't play gives immediate feedback.
+    ref.listen<String?>(
+      audioErrorProvider,
+      (previous, next) {
+        if (next != null && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(next)));
+          // clear after showing
+          ref.read(audioErrorProvider.notifier).state = null;
+        }
+      },
+    );
     return Scaffold(
       appBar: AppBar(
         title: const Text('Home'),
@@ -34,9 +47,13 @@ class HomeScreen extends ConsumerWidget {
             icon: const Icon(Icons.play_arrow),
             onPressed: () {
               final asyncValue = ref.read(homeTracksProvider);
-              asyncValue.whenOrNull(data: (tracks) {
+              asyncValue.whenOrNull(data: (tracks) async {
                 if (tracks.isEmpty) return;
-                ref.read(playerControllerProvider.notifier).playQueue(tracks, 0, origin: {'type': 'home'});
+                try {
+                  await ref.read(playerControllerProvider.notifier).playQueue(tracks, 0, origin: {'type': 'home'});
+                } catch (e) {
+                  if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Play All thất bại: $e')));
+                }
               });
             },
           ),
@@ -92,11 +109,17 @@ class HomeScreen extends ConsumerWidget {
               }
 
               return ListTile(
-                onTap: () {
+                onTap: () async {
                   if (trackId <= 0) return;
                   // Start playback of this track in the main player (do not navigate)
-                    final ctrl = ref.read(playerControllerProvider.notifier);
-                    ctrl.playQueue(tracks, i, origin: {'type': 'home'});
+                  final ctrl = ref.read(playerControllerProvider.notifier);
+                  try {
+                    await ctrl.playQueue(tracks, i, origin: {'type': 'home'});
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Không thể phát bài này: $e')));
+                    }
+                  }
                 },
                 title: Text(t.title),
                 subtitle: Text(t.artistName),

@@ -7,6 +7,8 @@ import '../../../data/models/track.dart';
 import '../../../data/repositories/interaction_repository.dart';
 import '../../../data/repositories/track_repository.dart';
 import 'audio_error_provider.dart';
+import 'package:dio/dio.dart';
+import '../../../shared/providers/dio_provider.dart';
 
 enum RepeatMode { off, all, one }
 
@@ -40,6 +42,11 @@ class PlayerStateModel {
 class PlayerController extends StateNotifier<PlayerStateModel> {
   final Ref ref;
   final AudioPlayer _audio = AudioPlayer();
+  // Simple in-memory cache of preview availability to avoid re-probing the
+  // same URLs repeatedly. Keyed by previewUrl -> (status, expiry).
+  final Map<String, bool> _availabilityStatus = {};
+  final Map<String, DateTime> _availabilityExpiry = {};
+  static const Duration _availabilityTTL = Duration(minutes: 5);
   int? _loggedTrackId; // track id already logged for start
   Timer? _tick;
   Timer? _persistDebounce;
@@ -74,6 +81,19 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
   Future<void> playTrack(Track track, {Map<String, dynamic>? origin}) async {
     await _audio.stop();
 
+    // Pre-check single track availability (filter out if preview returns 403)
+    if (track.previewUrl != null) {
+      final ok = await _filterAvailable([track]);
+      if (ok.isEmpty) {
+        // Still show the selected track in the player bar so the user sees
+        // what they tapped, but surface an error and do not attempt playback.
+        state = PlayerStateModel(current: track, playing: false, position: Duration.zero, queue: [track], currentIndex: 0, origin: origin ?? state.origin);
+        ref.read(audioErrorProvider.notifier).state = 'Nguồn không hợp lệ (403) — không thể phát bài này.';
+        _schedulePersist();
+        return;
+      }
+    }
+
     // Optimistically update UI to show selected track immediately, but mark playing=false
     state = PlayerStateModel(current: track, playing: false, position: Duration.zero, queue: [track], currentIndex: 0, origin: origin ?? state.origin);
     _loggedTrackId = null; // reset logging sentinel
@@ -107,7 +127,64 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
   Future<void> playQueue(List<Track> tracks, int startIndex, {Map<String, dynamic>? origin}) async {
     if (tracks.isEmpty || startIndex < 0 || startIndex >= tracks.length) return;
     await _audio.stop();
-    final original = List<Track>.from(tracks);
+    // Pre-filter tracks that return 403/forbidden for their preview URLs.
+    List<Track> filtered = tracks;
+    try {
+      // Only pre-check a small window around the requested start to avoid
+      // issuing HEAD requests for every track in the queue when the user
+      // taps a single item.
+      filtered = await _filterAvailable(tracks, limitChecks: 6, startIndex: startIndex);
+    } catch (_) {
+      // If the check fails, fall back to the original list
+      filtered = tracks;
+    }
+    if (filtered.isEmpty) {
+      // Nothing available to actually play. Show the tapped/desired track in
+      // the player bar (so users see their selection) but surface an error.
+      final fallbackIndex = (startIndex >= 0 && startIndex < tracks.length) ? startIndex : 0;
+      final fallback = tracks[fallbackIndex];
+      state = PlayerStateModel(
+        current: fallback,
+        playing: false,
+        position: Duration.zero,
+        queue: [fallback],
+        currentIndex: 0,
+        originalQueue: [fallback],
+        origin: origin ?? state.origin,
+        shuffle: false,
+        repeatMode: state.repeatMode,
+      );
+      ref.read(audioErrorProvider.notifier).state = 'Không có bài khả dụng để phát (mọi nguồn trả lỗi).';
+      _startTick();
+      _schedulePersist();
+      return;
+    }
+    // Map startIndex from original list to filtered list (by track id)
+    final desiredId = tracks[startIndex].id;
+    final mappedIndex = filtered.indexWhere((t) => t.id == desiredId);
+    if (mappedIndex >= 0) {
+      startIndex = mappedIndex;
+    } else {
+      // Desired track was filtered out (likely forbidden). Do not jump to
+      // the start of the playlist — instead show the tapped track in the
+      // player bar (playing=false) and keep the available queue as the
+      // filtered list. The user can manually try to play or navigate.
+      final desired = tracks[startIndex];
+      state = PlayerStateModel(
+        current: desired,
+        playing: false,
+        position: Duration.zero,
+        queue: filtered,
+        currentIndex: -1,
+        originalQueue: filtered,
+        origin: origin ?? state.origin,
+        shuffle: state.shuffle,
+        repeatMode: state.repeatMode,
+      );
+      _schedulePersist();
+      return;
+    }
+    final original = List<Track>.from(filtered);
     List<Track> activeQueue = original;
     // nếu đang bật shuffle thì xào lại (đảm bảo bài bắt đầu ở vị trí đầu)
     if (state.shuffle) {
@@ -266,6 +343,181 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       // ignore: avoid_print
       print('Audio load failed (jumpTo): ${track.previewUrl} -> $e');
     }
+  }
+
+  /// Returns list of tracks whose previewUrl appears accessible (not returning 403).
+  /// Uses the app's Dio client to perform a lightweight HEAD or ranged GET.
+  /// Returns list of tracks whose previewUrl appears accessible (not returning 403).
+  ///
+  /// If [limitChecks] is provided, the function will only perform network
+  /// probes for up to that many tracks centered on [startIndex] (useful when
+  /// starting a queue). Other tracks will be left untouched (they may still be
+  /// attempted later when playback reaches them). This reduces the number of
+  /// HEAD/Range requests performed on a single user action.
+  Future<List<Track>> _filterAvailable(List<Track> tracks, {int? limitChecks, int? startIndex}) async {
+    final dio = ref.read(dioProvider);
+    final out = <Track>[];
+    // Determine which indices we will actively check when limitChecks is set.
+    Set<int>? toCheck;
+    if (limitChecks != null && tracks.isNotEmpty) {
+      toCheck = <int>{};
+      final int start = startIndex == null ? 0 : (startIndex.clamp(0, tracks.length - 1));
+      toCheck.add(start);
+      int offset = 1;
+      while (toCheck.length < limitChecks && toCheck.length < tracks.length) {
+        final hi = start + offset;
+        final lo = start - offset;
+        if (hi < tracks.length) toCheck.add(hi);
+        if (toCheck.length >= limitChecks) break;
+        if (lo >= 0) toCheck.add(lo);
+        offset++;
+      }
+    }
+    for (final t in tracks) {
+      if (t.previewUrl == null) {
+        out.add(t);
+        continue;
+      }
+      final url = t.previewUrl!;
+      // Check cache first
+      final now = DateTime.now();
+      if (_availabilityStatus.containsKey(url)) {
+        final exp = _availabilityExpiry[url];
+        if (exp != null && now.isBefore(exp)) {
+          if (_availabilityStatus[url] == true) {
+            out.add(t);
+          }
+          // If cached as unavailable, skip it
+          continue;
+        } else {
+          // expired
+          _availabilityStatus.remove(url);
+          _availabilityExpiry.remove(url);
+        }
+      }
+
+      // If we have a limit and this index isn't in the toCheck set, optimistically
+      // include the track in the returned list to avoid mass-probing everything.
+      if (toCheck != null) {
+        final idx = tracks.indexOf(t);
+        if (!toCheck.contains(idx)) {
+          out.add(t);
+          continue;
+        }
+      }
+      try {
+        // Try HEAD first
+        final resp = await dio.head(t.previewUrl!, options: Options(validateStatus: (s) => s != null));
+        final sc = resp.statusCode ?? 0;
+        if (sc == 401 || sc == 403) {
+          // explicitly forbidden/unauthorized -> cache & skip
+          _availabilityStatus[url] = false;
+          _availabilityExpiry[url] = DateTime.now().add(_availabilityTTL);
+          continue;
+        }
+        if (sc == 405) {
+          // HEAD not allowed on some servers (405). Fall back to a small ranged GET to decide availability.
+          try {
+            final r2 = await dio.get(t.previewUrl!, options: Options(headers: {'Range': 'bytes=0-1'}, validateStatus: (s) => s != null));
+            final sc2 = r2.statusCode ?? 0;
+            if (sc2 == 401 || sc2 == 403) continue;
+            if (sc2 >= 400 && sc2 < 500) continue;
+            out.add(t);
+            _availabilityStatus[url] = true;
+            _availabilityExpiry[url] = DateTime.now().add(_availabilityTTL);
+            continue;
+          } catch (_) {
+            // network or other error -> treat as unavailable and skip
+            continue;
+          }
+        }
+        if (sc >= 400 && sc < 500) continue;
+        // success-ish -> cache
+        _availabilityStatus[url] = true;
+        _availabilityExpiry[url] = DateTime.now().add(_availabilityTTL);
+        out.add(t);
+        continue;
+      } catch (e) {
+        // HEAD may error (network, CORS, etc.); try a ranged GET to minimize transfer
+        try {
+          final r2 = await dio.get(t.previewUrl!, options: Options(headers: {'Range': 'bytes=0-1'}, validateStatus: (s) => s != null));
+          final sc2 = r2.statusCode ?? 0;
+          if (sc2 == 401 || sc2 == 403) continue;
+          if (sc2 >= 400 && sc2 < 500) continue;
+          _availabilityStatus[url] = true;
+          _availabilityExpiry[url] = DateTime.now().add(_availabilityTTL);
+          out.add(t);
+          continue;
+        } catch (_) {
+          // network or other error — treat as unavailable and skip
+          continue;
+        }
+      }
+    }
+    return out;
+  }
+
+  /// Scan the entire current queue and remove any tracks whose preview URL
+  /// returns 403/401 or other 4xx. Returns the number of removed tracks.
+  Future<int> scanAndRemoveForbiddenTracks() async {
+    final dio = ref.read(dioProvider);
+    int removed = 0;
+    // iterate backwards so removals don't shift upcoming indices
+    for (int i = state.queue.length - 1; i >= 0; i--) {
+      final t = state.queue[i];
+      if (t.previewUrl == null) continue; // simulated tracks are fine
+      bool forbidden = false;
+      try {
+        final r = await dio.head(t.previewUrl!, options: Options(validateStatus: (s) => s != null));
+        final sc = r.statusCode ?? 0;
+        if (sc == 401 || sc == 403) {
+          forbidden = true;
+        } else if (sc == 405) {
+          // HEAD not allowed -> try ranged GET fallback
+          try {
+            final r2 = await dio.get(t.previewUrl!, options: Options(headers: {'Range': 'bytes=0-1'}, validateStatus: (s) => s != null));
+            final sc2 = r2.statusCode ?? 0;
+            if (sc2 == 401 || sc2 == 403 || (sc2 >= 400 && sc2 < 500)) forbidden = true;
+          } catch (_) {
+            // network error -> be conservative and do not remove
+            forbidden = false;
+          }
+        } else if (sc >= 400 && sc < 500) {
+          forbidden = true;
+        }
+      } catch (_) {
+        // HEAD may fail; try ranged GET
+        try {
+          final r2 = await dio.get(t.previewUrl!, options: Options(headers: {'Range': 'bytes=0-1'}, validateStatus: (s) => s != null));
+          final sc2 = r2.statusCode ?? 0;
+          if (sc2 == 401 || sc2 == 403 || (sc2 >= 400 && sc2 < 500)) forbidden = true;
+        } catch (_) {
+          // network error -> don't remove aggressively
+          forbidden = false;
+        }
+      }
+      if (forbidden) {
+        final wasCurrent = i == state.currentIndex;
+        removeAt(i);
+        removed++;
+        // If we removed the current track, try to start playback of the new current
+        if (wasCurrent) {
+          final cur = state.current;
+          if (cur != null && cur.previewUrl != null) {
+            try {
+              await _audio.stop();
+              await _audio.setUrl(cur.previewUrl!);
+              await _audio.play();
+              state = state.copyWith(playing: true);
+            } catch (_) {
+              // ignore: if we can't play the new current then leave playing=false
+            }
+          }
+        }
+      }
+    }
+    _schedulePersist();
+    return removed;
   }
 
   void removeAt(int index) {

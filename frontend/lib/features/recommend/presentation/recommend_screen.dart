@@ -6,6 +6,7 @@ import '../../../shared/providers/dio_provider.dart';
 import '../../auth/application/auth_providers.dart';
 import 'package:dio/dio.dart';
 import '../application/recommend_controller.dart';
+import '../../../data/repositories/recommendation_repository.dart';
 import '../../../data/repositories/playlist_repository.dart';
 import '../../playlist/application/playlist_providers.dart';
 import '../../../data/models/track.dart';
@@ -19,6 +20,7 @@ class RecommendScreen extends ConsumerStatefulWidget {
 }
 
 class _RecommendScreenState extends ConsumerState<RecommendScreen> {
+  bool _creatingPlaylist = false;
   bool _loadingRemote = false;
   String? _error;
   List<int>? _artistIds;
@@ -137,9 +139,28 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
   @override
   Widget build(BuildContext context) {
     final playlists = widget.playlists ?? ref.watch(onboardingPlaylistsProvider);
+    final canCreate = ref.read(authControllerProvider).userId != null;
     if (playlists != null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Gợi ý cho bạn')),
+        appBar: AppBar(
+          title: const Text('Gợi ý cho bạn'),
+          actions: [
+            if (canCreate)
+              Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: _creatingPlaylist
+                    ? const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 12.0),
+                        child: Center(widthFactor: 1.0, child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+                      )
+                    : IconButton(
+                        tooltip: 'Tạo playlist từ gợi ý',
+                        icon: const Icon(Icons.playlist_add),
+                        onPressed: () => _createPlaylistFromRecommendations(context, ref),
+                      ),
+              )
+          ],
+        ),
         body: playlists.isEmpty
             ? const Center(child: Text('Không có gợi ý'))
             : FutureBuilder<void>(
@@ -227,7 +248,17 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
 
     // Fallback: fetch recommended/popular tracks from backend for display when no playlists
     return Scaffold(
-      appBar: AppBar(title: const Text('Recommendations')),
+      appBar: AppBar(
+        title: const Text('Recommendations'),
+        actions: [
+          if (canCreate)
+            IconButton(
+              tooltip: 'Tạo playlist từ gợi ý',
+              icon: const Icon(Icons.playlist_add),
+              onPressed: () => _createPlaylistFromRecommendations(context, ref),
+            ),
+        ],
+      ),
       body: _loadingRemote
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -263,6 +294,51 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
                   },
                 ),
     );
+  }
+
+  Future<void> _createPlaylistFromRecommendations(BuildContext context, WidgetRef ref) async {
+    if (_creatingPlaylist) return;
+    setState(() { _creatingPlaylist = true; });
+    try {
+      final auth = ref.read(authControllerProvider);
+      final uid = auth.userId;
+      if (uid == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vui lòng đăng nhập để tạo playlist')));
+        return;
+      }
+      final recRepo = ref.read(recommendationRepositoryProvider);
+      final playlistRepo = ref.read(playlistRepositoryProvider);
+      // Fetch top recommendations (limit 30)
+      final recs = await recRepo.recommendForUser(uid, limit: 30);
+      if (recs.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Không có đề xuất để tạo playlist')));
+        return;
+      }
+      final name = 'Gợi ý cho bạn - ${DateTime.now().toLocal().toIso8601String().split('T').first}';
+      final created = await playlistRepo.create(name, description: 'Playlist auto-generated from your listening behaviour', isPublic: true);
+      // Add tracks sequentially; ignore individual failures but report at the end
+      var added = 0;
+      for (final t in recs) {
+        final tidStr = t.id;
+        final tid = int.tryParse(tidStr) ?? int.tryParse(tidStr.replaceAll(RegExp(r"[^0-9]"), ''));
+        if (tid == null) continue;
+        try {
+          await playlistRepo.addTrack(created.id, tid);
+          added++;
+        } catch (_) {
+          // continue
+        }
+      }
+      // Refresh user's playlists provider so UI shows the new playlist
+      try {
+        ref.invalidate(myPlaylistsProvider);
+      } catch (_) {}
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Tạo playlist "${created.name}" với $added bài hát')));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi khi tạo playlist: $e')));
+    } finally {
+      if (mounted) setState(() { _creatingPlaylist = false; });
+    }
   }
 
   Future<List<Map<String, dynamic>>> _fetchRecommendedTracks() async {

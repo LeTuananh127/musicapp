@@ -236,3 +236,102 @@ async def deezer_stream(track_id: int, request: Request, db: Session = Depends(g
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.head('/stream/{track_id}')
+async def deezer_stream_head(track_id: int, request: Request, db: Session = Depends(get_db), cache: bool = True, refresh: bool = True):
+    """Return headers for a preview without sending the body so HEAD requests succeed.
+
+    This mirrors the availability logic of the GET endpoint but responds with
+    headers only (Content-Length, Accept-Ranges, Content-Type) so clients can
+    preflight availability using HEAD.
+    """
+    try:
+        t = get_track(track_id) if refresh else None
+        preview_url = None
+
+        if t and t.get('preview'):
+            preview_url = t.get('preview')
+            db_track = db.query(Track).filter(Track.id == track_id).first()
+            if db_track and db_track.preview_url != preview_url:
+                db_track.preview_url = preview_url
+                db.add(db_track)
+                db.commit()
+        else:
+            db_track = db.query(Track).filter(Track.id == track_id).first()
+            if db_track and db_track.preview_url:
+                preview_url = db_track.preview_url
+                if isinstance(preview_url, str) and preview_url.startswith('/'):
+                    base = str(request.base_url).rstrip('/')
+                    preview_url = base + preview_url
+            else:
+                raise HTTPException(status_code=404, detail='Preview not available')
+
+        cache_dir = Path(__file__).resolve().parents[2] / 'app' / 'static' / 'audio' / 'deezer'
+        cached_file = cache_dir / f'{track_id}.mp3'
+
+        # If we have a cached file, report its size and support for ranges
+        if cache and cached_file.exists():
+            try:
+                size = cached_file.stat().st_size
+                headers = {
+                    'Content-Length': str(size),
+                    'Accept-Ranges': 'bytes',
+                    'Content-Type': 'audio/mpeg'
+                }
+                from fastapi import Response
+
+                return Response(status_code=200, headers=headers)
+            except Exception:
+                # Fallthrough to upstream probe
+                pass
+
+        # No cached file: probe upstream with a small ranged GET to obtain headers.
+        # Some CDNs block non-browser clients; try a conservative two-step probe:
+        # 1) ranged GET without Referer, 2) ranged GET with a browser Referer header.
+        headers_base = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36',
+            'Accept': 'audio/*,*/*',
+            'Range': 'bytes=0-1'
+        }
+        resp = None
+        last_exc = None
+        for attempt_headers in (headers_base, {**headers_base, 'Referer': 'https://www.deezer.com/'}):
+            try:
+                resp = requests.get(preview_url, stream=True, timeout=12, headers=attempt_headers)
+                # If upstream returned a client error (401/403/4xx) map that back to client
+                if resp.status_code == 401 or resp.status_code == 403:
+                    raise HTTPException(status_code=resp.status_code, detail='Upstream denied preview')
+                if 400 <= resp.status_code < 500:
+                    raise HTTPException(status_code=resp.status_code, detail='Upstream returned client error')
+                # success-ish; break and use headers
+                break
+            except HTTPException:
+                # Propagate 4xx upstream responses immediately
+                raise
+            except Exception as e:
+                # Keep the last exception and try the next header set
+                last_exc = e
+                resp = None
+                continue
+
+        if resp is None:
+            # Both probes failed with network/other errors; return 502 (map upstream probe failure)
+            raise HTTPException(status_code=502, detail=str(last_exc) if last_exc is not None else 'Upstream probe failed')
+
+        # Build response headers based on upstream reply
+        headers = {}
+        if 'content-length' in resp.headers:
+            headers['Content-Length'] = resp.headers['content-length']
+        # If upstream returned Content-Range (206) include it; otherwise accept-ranges
+        if 'content-range' in resp.headers:
+            headers['Content-Range'] = resp.headers['content-range']
+        headers['Accept-Ranges'] = resp.headers.get('accept-ranges', 'bytes')
+        headers['Content-Type'] = resp.headers.get('content-type', 'audio/mpeg')
+        from fastapi import Response
+
+        return Response(status_code=200, headers=headers)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
