@@ -1,0 +1,14 @@
+# Chat API Dependencies
+# Install with: pip install -r chat_requirements.txt
+
+# OpenAI (GPT-3.5/GPT-4) - Most popular
+openai>=1.0.0
+
+# Google Gemini - Free tier available
+google-generativeai>=0.3.0
+
+# Groq (Llama 3) - Fast and free
+groq>=0.4.0
+
+# Optional: For better async support
+httpx>=0.25.0
