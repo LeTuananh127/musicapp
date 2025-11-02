@@ -19,6 +19,19 @@ class RecommendationOut(BaseModel):
     track_id: int
     score: float
 
+class MLRecommendationOut(BaseModel):
+    track_id: int
+    score: float
+    title: str
+    artist_name: str | None = None
+    artist_id: int
+    album_id: int | None = None
+    duration_ms: int
+    preview_url: str | None = None
+    cover_url: str | None = None
+    class Config:
+        from_attributes = True
+
 class PlaylistOut(BaseModel):
     id: int
     name: str

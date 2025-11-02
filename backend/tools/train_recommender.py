@@ -15,18 +15,27 @@ import numpy as np
 from collections import defaultdict
 
 from app.core.db import SessionLocal
-from app.models.music import Interaction
+from app.models.music import Interaction, TrackLike
 
 
 def gather_interactions(db):
-    # We consider interactions that "qualify" as positive signals: milestone >= 75 OR is_completed
+    """
+    Gather interaction data with confidence scores:
+    - Base play: 1.0
+    - Completed or milestone>=75: +3.0
+    - Liked (track_likes): +10.0 (strong positive signal)
+    """
+    # Get play interactions
     q = db.query(Interaction.user_id, Interaction.track_id, Interaction.seconds_listened, Interaction.is_completed, Interaction.milestone)
     rows = q.filter(Interaction.track_id != None).all()
+    
     user_map = {}
     item_map = {}
     user_idx = 0
     item_idx = 0
     data = defaultdict(float)
+    
+    # Process play interactions
     for u, t, secs, completed, milestone in rows:
         if t is None:
             continue
@@ -38,12 +47,33 @@ def gather_interactions(db):
             item_map[t] = item_idx; item_idx += 1
         ui = user_map[u]
         ii = item_map[t]
-        # confidence heuristic: base 1.0 for any play, +2 for completed or milestone>=75
+        # confidence heuristic: base 1.0 for any play, +3.0 for completed or milestone>=75
         conf = 1.0
         if completed or (milestone is not None and milestone >= 75):
             conf += 3.0
         # accumulate (in case of multiple plays)
         data[(ui, ii)] += conf
+    
+    # Add liked tracks with high confidence boost
+    likes = db.query(TrackLike.user_id, TrackLike.track_id).all()
+    likes_added = 0
+    for u, t in likes:
+        if t is None:
+            continue
+        u = int(u)
+        t = int(t)
+        # Add user/track to maps if not already present
+        if u not in user_map:
+            user_map[u] = user_idx; user_idx += 1
+        if t not in item_map:
+            item_map[t] = item_idx; item_idx += 1
+        ui = user_map[u]
+        ii = item_map[t]
+        # Add strong positive signal for likes
+        data[(ui, ii)] += 10.0
+        likes_added += 1
+    
+    print(f"Processed {likes_added} liked tracks with +10.0 confidence boost")
     return user_map, item_map, data
 
 

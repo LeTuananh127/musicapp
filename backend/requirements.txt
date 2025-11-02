@@ -19,6 +19,7 @@ scikit-learn==1.5.1
 orjson==3.10.6
 requests==2.32.3
 python-multipart==0.0.9
+APScheduler==3.10.4  # For scheduled model training
 
 # Optional (uncomment when build tools installed):
 # implicit==0.7.2
