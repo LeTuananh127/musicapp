@@ -33,6 +33,9 @@ class Track(Base):
     cover_url: Mapped[str | None] = mapped_column(String(500))
     views: Mapped[int] = mapped_column(Integer, default=0)
     is_explicit: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Mood/emotion features for AI recommendations
+    valence: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0.0-1.0: negative to positive mood
+    arousal: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0.0-1.0: calm to energetic
     # Deezer / external genre info (nullable)
     genre_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     genre_name: Mapped[str | None] = mapped_column(String(120), nullable=True)

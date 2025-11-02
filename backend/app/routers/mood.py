@@ -296,6 +296,7 @@ def recommend_by_mood(req: MoodRequest):
         scored.append({
             'id': t.id,
             'title': t.title,
+            'artist_name': t.artist_name,
             'preview_url': t.preview_url,
             'cover_url': t.cover_url,
             'predicted_mood': predicted,
@@ -391,6 +392,7 @@ def recommend_from_db(req: MoodDBRequest, db: Session = Depends(get_db)):
         scored.append({
             'id': t.id,
             'title': t.title,
+            'artist_name': t.artist_name,
             'preview_url': t.preview_url,
             'cover_url': t.cover_url,
             'predicted_mood': predicted,

@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from .core.config import get_settings
-from .routers import recommend, tracks, health, auth, interactions, playlists, deezer, onboard, artists
+from .routers import recommend, tracks, health, auth, interactions, playlists, deezer, onboard, artists, chat, mood
 from .core.db import engine, Base
 
 settings = get_settings()
@@ -52,6 +52,8 @@ app.include_router(playlists.router)
 app.include_router(recommend.router)
 app.include_router(onboard.router)
 app.include_router(artists.router)
+app.include_router(chat.router)
+app.include_router(mood.router)
 # Spotify integration removed — spotify router disabled
 app.include_router(deezer.router)
 

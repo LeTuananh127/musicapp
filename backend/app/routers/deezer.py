@@ -335,3 +335,44 @@ async def deezer_stream_head(track_id: int, request: Request, db: Session = Depe
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get('/image')
+async def deezer_image(url: str):
+    """Proxy Deezer album/artist images to avoid CORS issues.
+    
+    Example: /deezer/image?url=https://api.deezer.com/album/123/image
+    """
+    try:
+        # Validate that URL is from Deezer API
+        if not url.startswith('https://api.deezer.com/'):
+            raise HTTPException(status_code=400, detail='Invalid image URL')
+        
+        # Fetch image from Deezer with browser-like headers
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'image/*,*/*',
+            'Referer': 'https://www.deezer.com/'
+        }
+        
+        resp = requests.get(url, timeout=10, headers=headers, stream=True)
+        resp.raise_for_status()
+        
+        # Get content type from response
+        content_type = resp.headers.get('content-type', 'image/jpeg')
+        
+        # Stream the image back to client
+        return StreamingResponse(
+            resp.iter_content(chunk_size=8192),
+            media_type=content_type,
+            headers={
+                'Cache-Control': 'public, max-age=86400',  # Cache for 1 day
+            }
+        )
+    except requests.exceptions.HTTPError as e:
+        status_code = e.response.status_code if hasattr(e, 'response') else 502
+        raise HTTPException(status_code=status_code, detail=f'Failed to fetch image: {str(e)}')
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

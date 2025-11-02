@@ -22,8 +22,9 @@ class _ConversationalMoodChatWidgetState
     extends ConsumerState<ConversationalMoodChatWidget> {
   final TextEditingController _ctrl = TextEditingController();
   final ScrollController _scrollCtrl = ScrollController();
-  
-  String _provider = 'groq'; // openai, gemini, or groq (default: groq - free & fast)
+
+  String _provider =
+      'groq'; // openai, gemini, or groq (default: groq - free & fast)
   final Map<String, List<Track>> _moodTracksCache = {}; // Cache tracks by mood
 
   // Get session ID from provider (persistent across widget rebuilds)
@@ -54,16 +55,18 @@ class _ConversationalMoodChatWidgetState
 
       if (response.statusCode == 200 && response.data is Map) {
         final data = response.data as Map<String, dynamic>;
-        final messagesData = (data['history'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+        final messagesData =
+            (data['history'] as List?)?.cast<Map<String, dynamic>>() ?? [];
 
         debugPrint('📨 Loaded ${messagesData.length} messages from history');
-        
-        final loadedMessages = messagesData.map((m) => ChatMessage.fromJson(m)).toList();
-        
+
+        final loadedMessages =
+            messagesData.map((m) => ChatMessage.fromJson(m)).toList();
+
         // Update messages in provider
         ref.read(chatStateProvider.notifier).setMessages(loadedMessages);
         debugPrint('✅ Messages set in provider: ${loadedMessages.length}');
-        
+
         // Try to detect mood from last messages
         for (var msg in loadedMessages.reversed) {
           if (msg.role == 'assistant') {
@@ -85,24 +88,28 @@ class _ConversationalMoodChatWidgetState
   String? _extractMoodFromResponse(String text) {
     // Try to extract mood from JSON response first
     try {
-      final jsonMatch = RegExp(r'\{[^}]*"mood"\s*:\s*"([^"]+)"[^}]*\}').firstMatch(text);
+      final jsonMatch =
+          RegExp(r'\{[^}]*"mood"\s*:\s*"([^"]+)"[^}]*\}').firstMatch(text);
       if (jsonMatch != null) {
         return jsonMatch.group(1)?.toLowerCase();
       }
     } catch (_) {}
-    
+
     // Try keyword detection with more specific patterns
     final lower = text.toLowerCase();
-    
+
     // Check for specific mood keywords (order matters - most specific first)
     if (lower.contains(RegExp(r'\bangry\b'))) return 'angry';
     if (lower.contains(RegExp(r'\bsad\b'))) return 'sad';
-    if (lower.contains(RegExp(r'\brelaxed\b')) || lower.contains(RegExp(r'\bcalm\b'))) return 'relaxed';
+    if (lower.contains(RegExp(r'\brelaxed\b')) ||
+        lower.contains(RegExp(r'\bcalm\b'))) return 'relaxed';
     if (lower.contains(RegExp(r'\benergetic\b'))) return 'energetic';
-    if (lower.contains(RegExp(r'\bhappy\b')) || lower.contains(RegExp(r'\bjoyful\b'))) return 'happy';
-    
+    if (lower.contains(RegExp(r'\bhappy\b')) ||
+        lower.contains(RegExp(r'\bjoyful\b'))) return 'happy';
+
     return null;
   }
+
   Future<void> _sendMessage() async {
     final text = _ctrl.text.trim();
     if (text.isEmpty) return;
@@ -148,12 +155,14 @@ class _ConversationalMoodChatWidgetState
         // Add message via provider
         ref.read(chatStateProvider.notifier).addMessage(assistantMsg);
         ref.read(chatStateProvider.notifier).setLoading(false);
-        
+
         // Update detected mood - prioritize user input first, then backend mood
         final currentMood = ref.read(chatStateProvider).detectedMood;
-        String? detectedMood = _extractMoodFromResponse(text); // Check user's message
+        String? detectedMood =
+            _extractMoodFromResponse(text); // Check user's message
         if (detectedMood == null && data['mood'] != null) {
-          detectedMood = (data['mood'] as String).toLowerCase(); // Fallback to backend
+          detectedMood =
+              (data['mood'] as String).toLowerCase(); // Fallback to backend
         }
         if (detectedMood != null) {
           // Clear cache only when mood changes
@@ -162,9 +171,10 @@ class _ConversationalMoodChatWidgetState
           }
           ref.read(chatStateProvider.notifier).setMood(detectedMood);
         }
-        
+
         // If action is 'search_mood', trigger music search
-        if (data['suggested_action'] == 'search_mood' && ref.read(chatStateProvider).detectedMood != null) {
+        if (data['suggested_action'] == 'search_mood' &&
+            ref.read(chatStateProvider).detectedMood != null) {
           _showMusicRecommendations();
         }
 
@@ -182,9 +192,9 @@ class _ConversationalMoodChatWidgetState
     } catch (e) {
       ref.read(chatStateProvider.notifier).setLoading(false);
       ref.read(chatStateProvider.notifier).addMessage(ChatMessage(
-        role: 'assistant',
-        content: '❌ Sorry, I encountered an error: ${e.toString()}',
-      ));
+            role: 'assistant',
+            content: '❌ Sorry, I encountered an error: ${e.toString()}',
+          ));
     }
   }
 
@@ -195,7 +205,8 @@ class _ConversationalMoodChatWidgetState
     // Check cache first - reuse if available
     if (_moodTracksCache.containsKey(detectedMood)) {
       // Show bottom sheet with cached tracks immediately
-      _showMusicBottomSheetWithTracks(detectedMood, _moodTracksCache[detectedMood]!);
+      _showMusicBottomSheetWithTracks(
+          detectedMood, _moodTracksCache[detectedMood]!);
     } else {
       // Show bottom sheet with loading state and fetch new tracks
       _showMusicBottomSheetWithLoading(detectedMood);
@@ -248,8 +259,8 @@ class _ConversationalMoodChatWidgetState
         '$base/mood/recommend/from_db',
         data: {
           'user_text': mood,
-          'top_k': 100,  // Get 100 candidates for randomization
-          'limit': 500,  // Balanced: enough variety without timeout
+          'top_k': 100, // Get 100 candidates for randomization
+          'limit': 500, // Balanced: enough variety without timeout
         },
         options: Options(
           receiveTimeout: const Duration(seconds: 60), // Extended timeout
@@ -258,7 +269,8 @@ class _ConversationalMoodChatWidgetState
 
       if (response.statusCode == 200 && response.data is Map) {
         final data = response.data as Map<String, dynamic>;
-        final tracksData = (data['candidates'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+        final tracksData =
+            (data['candidates'] as List?)?.cast<Map<String, dynamic>>() ?? [];
 
         if (tracksData.isNotEmpty) {
           // Convert to Track models - fix id type issue and proxy URLs
@@ -268,21 +280,26 @@ class _ConversationalMoodChatWidgetState
             if (trackData['id'] is int) {
               trackData['id'] = trackData['id'].toString();
             }
-            
+
             // Ensure required fields exist with defaults
             trackData['title'] = trackData['title'] ?? 'Unknown';
-            trackData['artistName'] = trackData['artist_name'] ?? trackData['artistName'] ?? 'Unknown Artist';
-            trackData['durationMs'] = trackData['duration_ms'] ?? trackData['durationMs'] ?? 0;
-            
+            trackData['artistName'] = trackData['artist_name'] ??
+                trackData['artistName'] ??
+                'Unknown Artist';
+            trackData['durationMs'] =
+                trackData['duration_ms'] ?? trackData['durationMs'] ?? 0;
+
             // Fix preview URL - add Deezer proxy for streaming
-            final rawPreview = trackData['preview_url'] ?? trackData['previewUrl'];
+            final rawPreview =
+                trackData['preview_url'] ?? trackData['previewUrl'];
             if (rawPreview != null) {
               final previewStr = rawPreview.toString();
-              if (previewStr.contains('cdnt-preview.dzcdn.net') || 
-                  previewStr.contains('cdns-preview.dzcdn.net') || 
+              if (previewStr.contains('cdnt-preview.dzcdn.net') ||
+                  previewStr.contains('cdns-preview.dzcdn.net') ||
                   previewStr.contains('dzcdn.net')) {
                 // Use deezer stream proxy
-                trackData['previewUrl'] = '$base/deezer/stream/${trackData['id']}';
+                trackData['previewUrl'] =
+                    '$base/deezer/stream/${trackData['id']}';
               } else if (previewStr.startsWith('http')) {
                 trackData['previewUrl'] = previewStr;
               } else {
@@ -291,16 +308,18 @@ class _ConversationalMoodChatWidgetState
             } else {
               trackData['previewUrl'] = null;
             }
-            
+
             // Fix cover URL
             final rawCover = trackData['cover_url'] ?? trackData['coverUrl'];
             if (rawCover != null) {
               final coverStr = rawCover.toString();
               if (coverStr.startsWith('http')) {
-                if (coverStr.contains('/deezer/image') || coverStr.contains('/deezer/stream')) {
+                if (coverStr.contains('/deezer/image') ||
+                    coverStr.contains('/deezer/stream')) {
                   trackData['coverUrl'] = coverStr;
                 } else if (coverStr.contains('api.deezer.com')) {
-                  trackData['coverUrl'] = '$base/deezer/image?url=${Uri.encodeComponent(coverStr)}';
+                  trackData['coverUrl'] =
+                      '$base/deezer/image?url=${Uri.encodeComponent(coverStr)}';
                 } else {
                   trackData['coverUrl'] = coverStr;
                 }
@@ -310,10 +329,10 @@ class _ConversationalMoodChatWidgetState
             } else {
               trackData['coverUrl'] = null;
             }
-            
+
             return Track.fromJson(trackData);
           }).toList();
-          
+
           // Shuffle and take random 20 tracks for variety
           allTracks.shuffle();
           return allTracks.take(20).toList();
@@ -328,7 +347,7 @@ class _ConversationalMoodChatWidgetState
 
   Future<void> _playTrack(Track track, List<Track> allTracks, int index) async {
     final detectedMood = ref.read(chatStateProvider).detectedMood;
-    
+
     try {
       await ref.read(playerControllerProvider.notifier).playQueue(
         allTracks,
@@ -338,7 +357,7 @@ class _ConversationalMoodChatWidgetState
           'mood': detectedMood ?? 'unknown',
         },
       );
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -376,7 +395,8 @@ class _ConversationalMoodChatWidgetState
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Text('You don\'t have any playlists. Create one in the Playlists tab.'),
+                          const Text(
+                              'You don\'t have any playlists. Create one in the Playlists tab.'),
                           const SizedBox(height: 12),
                           FilledButton(
                             onPressed: () {
@@ -398,16 +418,18 @@ class _ConversationalMoodChatWidgetState
                       return ListTile(
                         leading: const Icon(Icons.queue_music),
                         title: Text(p.name),
-                        subtitle: p.description != null && p.description!.isNotEmpty 
-                            ? Text(p.description!) 
-                            : null,
+                        subtitle:
+                            p.description != null && p.description!.isNotEmpty
+                                ? Text(p.description!)
+                                : null,
                         onTap: () async {
                           final repo = r.read(playlistRepositoryProvider);
                           final tid = int.tryParse(track.id);
                           if (tid == null) {
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Invalid track ID')),
+                                const SnackBar(
+                                    content: Text('Invalid track ID')),
                               );
                             }
                             return;
@@ -417,13 +439,17 @@ class _ConversationalMoodChatWidgetState
                             if (mounted) {
                               Navigator.pop(ctx);
                               ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Added "${track.title}" to ${p.name}')),
+                                SnackBar(
+                                    content: Text(
+                                        'Added "${track.title}" to ${p.name}')),
                               );
                             }
                           } catch (e) {
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Error adding to playlist: $e')),
+                                SnackBar(
+                                    content:
+                                        Text('Error adding to playlist: $e')),
                               );
                             }
                           }
@@ -458,7 +484,8 @@ class _ConversationalMoodChatWidgetState
       context: context,
       builder: (context) {
         final controller = TextEditingController(
-          text: '${detectedMood?.toUpperCase()} Music - ${DateTime.now().toString().substring(0, 10)}',
+          text:
+              '${detectedMood?.toUpperCase()} Music - ${DateTime.now().toString().substring(0, 10)}',
         );
         return AlertDialog(
           title: const Text('Save as Playlist'),
@@ -490,7 +517,7 @@ class _ConversationalMoodChatWidgetState
       // Create new playlist
       final repo = ref.read(playlistRepositoryProvider);
       final newPlaylist = await repo.create(playlistName.trim());
-      
+
       // Add all tracks to playlist
       for (final track in tracks) {
         final trackId = int.tryParse(track.id);
@@ -545,7 +572,7 @@ class _ConversationalMoodChatWidgetState
   void _clearConversation() {
     // Reset chat state in provider
     ref.read(chatStateProvider.notifier).reset();
-    
+
     // Clear local cache
     _moodTracksCache.clear();
   }
@@ -554,9 +581,10 @@ class _ConversationalMoodChatWidgetState
   Widget build(BuildContext context) {
     // Watch chat state from provider
     final chatState = ref.watch(chatStateProvider);
-    
-    debugPrint('🔧 Building chat widget - Messages: ${chatState.messages.length}, Mood: ${chatState.detectedMood}, Loading: ${chatState.isLoading}');
-    
+
+    debugPrint(
+        '🔧 Building chat widget - Messages: ${chatState.messages.length}, Mood: ${chatState.detectedMood}, Loading: ${chatState.isLoading}');
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Music Chat 🎵'),
@@ -572,7 +600,9 @@ class _ConversationalMoodChatWidgetState
                   children: [
                     Icon(
                       Icons.check,
-                      color: _provider == 'openai' ? Colors.green : Colors.transparent,
+                      color: _provider == 'openai'
+                          ? Colors.green
+                          : Colors.transparent,
                     ),
                     const SizedBox(width: 8),
                     const Text('OpenAI GPT'),
@@ -585,7 +615,9 @@ class _ConversationalMoodChatWidgetState
                   children: [
                     Icon(
                       Icons.check,
-                      color: _provider == 'gemini' ? Colors.green : Colors.transparent,
+                      color: _provider == 'gemini'
+                          ? Colors.green
+                          : Colors.transparent,
                     ),
                     const SizedBox(width: 8),
                     const Text('Google Gemini'),
@@ -598,7 +630,9 @@ class _ConversationalMoodChatWidgetState
                   children: [
                     Icon(
                       Icons.check,
-                      color: _provider == 'groq' ? Colors.green : Colors.transparent,
+                      color: _provider == 'groq'
+                          ? Colors.green
+                          : Colors.transparent,
                     ),
                     const SizedBox(width: 8),
                     const Text('Groq (Llama 3)'),
@@ -641,7 +675,7 @@ class _ConversationalMoodChatWidgetState
                 ],
               ),
             ),
-          
+
           // Chat messages
           Expanded(
             child: chatState.messages.isEmpty
@@ -692,7 +726,8 @@ class _ConversationalMoodChatWidgetState
                             if (!isUser) ...[
                               CircleAvatar(
                                 backgroundColor: Theme.of(context).primaryColor,
-                                child: const Icon(Icons.smart_toy, color: Colors.white),
+                                child: const Icon(Icons.smart_toy,
+                                    color: Colors.white),
                               ),
                               const SizedBox(width: 8),
                             ],
@@ -711,7 +746,8 @@ class _ConversationalMoodChatWidgetState
                                 child: Text(
                                   msg.content,
                                   style: TextStyle(
-                                    color: isUser ? Colors.white : Colors.black87,
+                                    color:
+                                        isUser ? Colors.white : Colors.black87,
                                     fontSize: 15,
                                   ),
                                 ),
@@ -721,7 +757,8 @@ class _ConversationalMoodChatWidgetState
                               const SizedBox(width: 8),
                               CircleAvatar(
                                 backgroundColor: Colors.grey[300],
-                                child: const Icon(Icons.person, color: Colors.white),
+                                child: const Icon(Icons.person,
+                                    color: Colors.white),
                               ),
                             ],
                           ],
@@ -865,7 +902,8 @@ class _MusicLoadingSheetState extends State<_MusicLoadingSheet> {
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   color: Theme.of(context).primaryColor,
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(16)),
                 ),
                 child: Row(
                   children: [
@@ -915,11 +953,18 @@ class _MusicLoadingSheetState extends State<_MusicLoadingSheet> {
                             child: Padding(
                               padding: const EdgeInsets.all(16.0),
                               child: Column(
+                                mainAxisSize: MainAxisSize.min,
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  const Icon(Icons.error_outline, size: 48, color: Colors.red),
+                                  const Icon(Icons.error_outline,
+                                      size: 48, color: Colors.red),
                                   const SizedBox(height: 16),
-                                  Text('Error: $_error'),
+                                  Text(
+                                    'Error: $_error',
+                                    textAlign: TextAlign.center,
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                   const SizedBox(height: 16),
                                   ElevatedButton(
                                     onPressed: () {
@@ -939,15 +984,18 @@ class _MusicLoadingSheetState extends State<_MusicLoadingSheet> {
                             ? const Center(child: Text('No tracks found'))
                             : Consumer(
                                 builder: (context, ref, _) {
-                                  final likedTracks = ref.watch(likedTracksProvider);
+                                  final likedTracks =
+                                      ref.watch(likedTracksProvider);
 
                                   return ListView.builder(
                                     controller: scrollController,
                                     itemCount: _tracks!.length,
                                     itemBuilder: (context, index) {
                                       final track = _tracks![index];
-                                      final trackId = int.tryParse(track.id) ?? -1;
-                                      final isLiked = likedTracks.contains(trackId);
+                                      final trackId =
+                                          int.tryParse(track.id) ?? -1;
+                                      final isLiked =
+                                          likedTracks.contains(trackId);
 
                                       return ListTile(
                                         leading: track.coverUrl != null
@@ -956,9 +1004,12 @@ class _MusicLoadingSheetState extends State<_MusicLoadingSheet> {
                                                 width: 48,
                                                 height: 48,
                                                 fit: BoxFit.cover,
-                                                errorBuilder: (_, __, ___) => const Icon(Icons.music_note, size: 48),
+                                                errorBuilder: (_, __, ___) =>
+                                                    const Icon(Icons.music_note,
+                                                        size: 48),
                                               )
-                                            : const Icon(Icons.music_note, size: 48),
+                                            : const Icon(Icons.music_note,
+                                                size: 48),
                                         title: Text(track.title),
                                         subtitle: Text(track.artistName),
                                         trailing: Row(
@@ -966,19 +1017,27 @@ class _MusicLoadingSheetState extends State<_MusicLoadingSheet> {
                                           children: [
                                             IconButton(
                                               icon: Icon(
-                                                isLiked ? Icons.favorite : Icons.favorite_border,
-                                                color: isLiked ? Colors.red : null,
+                                                isLiked
+                                                    ? Icons.favorite
+                                                    : Icons.favorite_border,
+                                                color:
+                                                    isLiked ? Colors.red : null,
                                               ),
-                                              tooltip: isLiked ? 'Unlike' : 'Like',
+                                              tooltip:
+                                                  isLiked ? 'Unlike' : 'Like',
                                               onPressed: () {
-                                                ref.read(likedTracksProvider.notifier).toggle(trackId);
+                                                ref
+                                                    .read(likedTracksProvider
+                                                        .notifier)
+                                                    .toggle(trackId);
                                               },
                                             ),
                                             PopupMenuButton<String>(
                                               icon: const Icon(Icons.more_vert),
                                               tooltip: 'More options',
                                               onSelected: (value) {
-                                                if (value == 'add_to_playlist') {
+                                                if (value ==
+                                                    'add_to_playlist') {
                                                   widget.onAddToPlaylist(track);
                                                 }
                                               },
@@ -997,7 +1056,8 @@ class _MusicLoadingSheetState extends State<_MusicLoadingSheet> {
                                             ),
                                           ],
                                         ),
-                                        onTap: () => widget.onPlayTrack(track, _tracks!, index),
+                                        onTap: () => widget.onPlayTrack(
+                                            track, _tracks!, index),
                                       );
                                     },
                                   );
@@ -1062,7 +1122,8 @@ class _CachedMusicSheet extends ConsumerWidget {
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: Theme.of(context).primaryColor,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(16)),
             ),
             child: Row(
               children: [
@@ -1106,7 +1167,8 @@ class _CachedMusicSheet extends ConsumerWidget {
                           width: 48,
                           height: 48,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const Icon(Icons.music_note, size: 48),
+                          errorBuilder: (_, __, ___) =>
+                              const Icon(Icons.music_note, size: 48),
                         )
                       : const Icon(Icons.music_note, size: 48),
                   title: Text(track.title),
@@ -1121,7 +1183,9 @@ class _CachedMusicSheet extends ConsumerWidget {
                         ),
                         tooltip: isLiked ? 'Unlike' : 'Like',
                         onPressed: () {
-                          ref.read(likedTracksProvider.notifier).toggle(trackId);
+                          ref
+                              .read(likedTracksProvider.notifier)
+                              .toggle(trackId);
                         },
                       ),
                       PopupMenuButton<String>(
