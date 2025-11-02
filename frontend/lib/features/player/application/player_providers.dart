@@ -6,6 +6,7 @@ import 'dart:convert';
 import '../../../data/models/track.dart';
 import '../../../data/repositories/interaction_repository.dart';
 import '../../../data/repositories/track_repository.dart';
+import '../../../shared/services/track_error_logger.dart';
 import 'audio_error_provider.dart';
 import 'package:dio/dio.dart';
 import '../../../shared/providers/dio_provider.dart';
@@ -22,8 +23,26 @@ class PlayerStateModel {
   final Map<String, dynamic>? origin;
   final bool shuffle;
   final RepeatMode repeatMode;
-  const PlayerStateModel({this.current, this.playing = false, this.position = Duration.zero, this.queue = const [], this.currentIndex = -1, this.originalQueue = const [], this.origin, this.shuffle = false, this.repeatMode = RepeatMode.off});
-  PlayerStateModel copyWith({Track? current, bool? playing, Duration? position, List<Track>? queue, int? currentIndex, List<Track>? originalQueue, Map<String, dynamic>? origin, bool? shuffle, RepeatMode? repeatMode}) =>
+  const PlayerStateModel(
+      {this.current,
+      this.playing = false,
+      this.position = Duration.zero,
+      this.queue = const [],
+      this.currentIndex = -1,
+      this.originalQueue = const [],
+      this.origin,
+      this.shuffle = false,
+      this.repeatMode = RepeatMode.off});
+  PlayerStateModel copyWith(
+          {Track? current,
+          bool? playing,
+          Duration? position,
+          List<Track>? queue,
+          int? currentIndex,
+          List<Track>? originalQueue,
+          Map<String, dynamic>? origin,
+          bool? shuffle,
+          RepeatMode? repeatMode}) =>
       PlayerStateModel(
         current: current ?? this.current,
         playing: playing ?? this.playing,
@@ -64,6 +83,12 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
         _logInteraction(completed: true);
         if (state.repeatMode == RepeatMode.one) {
           // restart the same track
+          final cur = state.current;
+          if (cur != null) {
+            // Reset milestones for replay
+            _milestonesHit?.remove(cur.id);
+            _loggedTrackId = null;
+          }
           try {
             _audio.seek(Duration.zero);
             _audio.play();
@@ -85,18 +110,39 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
     if (track.previewUrl != null) {
       final ok = await _filterAvailable([track]);
       if (ok.isEmpty) {
+        // Log 403 error to CSV
+        await TrackErrorLogger.log403Error(track,
+            errorDetails: 'Single track 403 check failed');
+
         // Still show the selected track in the player bar so the user sees
         // what they tapped, but surface an error and do not attempt playback.
-        state = PlayerStateModel(current: track, playing: false, position: Duration.zero, queue: [track], currentIndex: 0, origin: origin ?? state.origin);
-        ref.read(audioErrorProvider.notifier).state = 'Nguồn không hợp lệ (403) — không thể phát bài này.';
+        state = PlayerStateModel(
+            current: track,
+            playing: false,
+            position: Duration.zero,
+            queue: [track],
+            currentIndex: 0,
+            origin: origin ?? state.origin);
+        ref.read(audioErrorProvider.notifier).state =
+            'Nguồn không hợp lệ (403) — không thể phát bài này.';
         _schedulePersist();
         return;
       }
     }
 
     // Optimistically update UI to show selected track immediately, but mark playing=false
-    state = PlayerStateModel(current: track, playing: false, position: Duration.zero, queue: [track], currentIndex: 0, origin: origin ?? state.origin);
+    state = PlayerStateModel(
+        current: track,
+        playing: false,
+        position: Duration.zero,
+        queue: [track],
+        currentIndex: 0,
+        origin: origin ?? state.origin);
     _loggedTrackId = null; // reset logging sentinel
+
+    // Reset milestones for this track (allow re-logging on replay)
+    _milestonesHit?.remove(track.id);
+
     _logInteraction(); // initial log (0 seconds listened)
     _startTick(); // still used for milestone detection / simulation fallback
     _schedulePersist();
@@ -117,14 +163,16 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       state = state.copyWith(playing: true);
     } catch (e) {
       // set audio error for UI
-      ref.read(audioErrorProvider.notifier).state = 'Audio load failed: ${e.toString()}';
+      ref.read(audioErrorProvider.notifier).state =
+          'Audio load failed: ${e.toString()}';
       // ignore: avoid_print
       print('Audio load failed (playTrack): ${track.previewUrl} -> $e');
       // keep playing=false; UI already shows selected track
     }
   }
 
-  Future<void> playQueue(List<Track> tracks, int startIndex, {Map<String, dynamic>? origin}) async {
+  Future<void> playQueue(List<Track> tracks, int startIndex,
+      {Map<String, dynamic>? origin}) async {
     if (tracks.isEmpty || startIndex < 0 || startIndex >= tracks.length) return;
     await _audio.stop();
     // Pre-filter tracks that return 403/forbidden for their preview URLs.
@@ -133,7 +181,8 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       // Only pre-check a small window around the requested start to avoid
       // issuing HEAD requests for every track in the queue when the user
       // taps a single item.
-      filtered = await _filterAvailable(tracks, limitChecks: 6, startIndex: startIndex);
+      filtered = await _filterAvailable(tracks,
+          limitChecks: 6, startIndex: startIndex);
     } catch (_) {
       // If the check fails, fall back to the original list
       filtered = tracks;
@@ -141,7 +190,8 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
     if (filtered.isEmpty) {
       // Nothing available to actually play. Show the tapped/desired track in
       // the player bar (so users see their selection) but surface an error.
-      final fallbackIndex = (startIndex >= 0 && startIndex < tracks.length) ? startIndex : 0;
+      final fallbackIndex =
+          (startIndex >= 0 && startIndex < tracks.length) ? startIndex : 0;
       final fallback = tracks[fallbackIndex];
       state = PlayerStateModel(
         current: fallback,
@@ -154,7 +204,8 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
         shuffle: false,
         repeatMode: state.repeatMode,
       );
-      ref.read(audioErrorProvider.notifier).state = 'Không có bài khả dụng để phát (mọi nguồn trả lỗi).';
+      ref.read(audioErrorProvider.notifier).state =
+          'Không có bài khả dụng để phát (mọi nguồn trả lỗi).';
       _startTick();
       _schedulePersist();
       return;
@@ -220,13 +271,18 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
         await _audio.play();
         state = state.copyWith(playing: true);
       } catch (e) {
-        ref.read(audioErrorProvider.notifier).state = 'Audio load failed: ${e.toString()}';
+        ref.read(audioErrorProvider.notifier).state =
+            'Audio load failed: ${e.toString()}';
         // ignore: avoid_print
         print('Audio load failed (playQueue start): ${start.previewUrl} -> $e');
         // keep playing=false
       }
     }
     _loggedTrackId = null;
+
+    // Reset milestones for this track
+    _milestonesHit?.remove(start.id);
+
     _logInteraction();
     _startTick();
     _schedulePersist();
@@ -242,10 +298,12 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
         List<Track> newQueue;
         if (state.shuffle) {
           final original = [...state.originalQueue];
-            original.shuffle();
+          original.shuffle();
           newQueue = original;
         } else {
-          newQueue = state.originalQueue.isNotEmpty ? state.originalQueue : state.queue;
+          newQueue = state.originalQueue.isNotEmpty
+              ? state.originalQueue
+              : state.queue;
         }
         nextIndex = 0;
         state = state.copyWith(queue: newQueue);
@@ -260,8 +318,16 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
     await _audio.stop();
 
     // Optimistically set current to nextTrack; don't mark playing until load succeeds
-    state = state.copyWith(current: nextTrack, position: Duration.zero, playing: false, currentIndex: nextIndex);
+    state = state.copyWith(
+        current: nextTrack,
+        position: Duration.zero,
+        playing: false,
+        currentIndex: nextIndex);
     _loggedTrackId = null;
+
+    // Reset milestones for this track
+    _milestonesHit?.remove(nextTrack.id);
+
     _logInteraction();
     _startTick();
     _schedulePersist();
@@ -278,7 +344,8 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       await _audio.play();
       state = state.copyWith(playing: true);
     } catch (e) {
-      ref.read(audioErrorProvider.notifier).state = 'Audio load failed: ${e.toString()}';
+      ref.read(audioErrorProvider.notifier).state =
+          'Audio load failed: ${e.toString()}';
       // ignore: avoid_print
       print('Audio load failed (next): ${nextTrack.previewUrl} -> $e');
     }
@@ -290,9 +357,17 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
     final prevTrack = state.queue[prevIndex];
     await _audio.stop();
     // Optimistically update current
-    state = state.copyWith(current: prevTrack, position: Duration.zero, playing: false, currentIndex: prevIndex);
+    state = state.copyWith(
+        current: prevTrack,
+        position: Duration.zero,
+        playing: false,
+        currentIndex: prevIndex);
     await _audio.stop();
     _loggedTrackId = null;
+
+    // Reset milestones for this track
+    _milestonesHit?.remove(prevTrack.id);
+
     _logInteraction();
     _startTick();
 
@@ -308,7 +383,8 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       await _audio.play();
       state = state.copyWith(playing: true);
     } catch (e) {
-      ref.read(audioErrorProvider.notifier).state = 'Audio load failed: ${e.toString()}';
+      ref.read(audioErrorProvider.notifier).state =
+          'Audio load failed: ${e.toString()}';
       // ignore: avoid_print
       print('Audio load failed (previous): ${prevTrack.previewUrl} -> $e');
     }
@@ -319,9 +395,17 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
     final track = state.queue[index];
     await _audio.stop();
     // Optimistically set current track
-    state = state.copyWith(current: track, position: Duration.zero, playing: false, currentIndex: index);
+    state = state.copyWith(
+        current: track,
+        position: Duration.zero,
+        playing: false,
+        currentIndex: index);
     await _audio.stop();
     _loggedTrackId = null;
+
+    // Reset milestones for this track
+    _milestonesHit?.remove(track.id);
+
     if (autoplay) {
       _logInteraction();
       _startTick();
@@ -339,7 +423,8 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       if (autoplay) await _audio.play();
       if (autoplay) state = state.copyWith(playing: true);
     } catch (e) {
-      ref.read(audioErrorProvider.notifier).state = 'Audio load failed: ${e.toString()}';
+      ref.read(audioErrorProvider.notifier).state =
+          'Audio load failed: ${e.toString()}';
       // ignore: avoid_print
       print('Audio load failed (jumpTo): ${track.previewUrl} -> $e');
     }
@@ -354,14 +439,16 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
   /// starting a queue). Other tracks will be left untouched (they may still be
   /// attempted later when playback reaches them). This reduces the number of
   /// HEAD/Range requests performed on a single user action.
-  Future<List<Track>> _filterAvailable(List<Track> tracks, {int? limitChecks, int? startIndex}) async {
+  Future<List<Track>> _filterAvailable(List<Track> tracks,
+      {int? limitChecks, int? startIndex}) async {
     final dio = ref.read(dioProvider);
     final out = <Track>[];
     // Determine which indices we will actively check when limitChecks is set.
     Set<int>? toCheck;
     if (limitChecks != null && tracks.isNotEmpty) {
       toCheck = <int>{};
-      final int start = startIndex == null ? 0 : (startIndex.clamp(0, tracks.length - 1));
+      final int start =
+          startIndex == null ? 0 : (startIndex.clamp(0, tracks.length - 1));
       toCheck.add(start);
       int offset = 1;
       while (toCheck.length < limitChecks && toCheck.length < tracks.length) {
@@ -407,9 +494,14 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       }
       try {
         // Try HEAD first
-        final resp = await dio.head(t.previewUrl!, options: Options(validateStatus: (s) => s != null));
+        final resp = await dio.head(t.previewUrl!,
+            options: Options(validateStatus: (s) => s != null));
         final sc = resp.statusCode ?? 0;
         if (sc == 401 || sc == 403) {
+          // Log 403 error to CSV
+          await TrackErrorLogger.log403Error(t,
+              errorDetails: 'HEAD request returned $sc');
+
           // explicitly forbidden/unauthorized -> cache & skip
           _availabilityStatus[url] = false;
           _availabilityExpiry[url] = DateTime.now().add(_availabilityTTL);
@@ -418,9 +510,17 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
         if (sc == 405) {
           // HEAD not allowed on some servers (405). Fall back to a small ranged GET to decide availability.
           try {
-            final r2 = await dio.get(t.previewUrl!, options: Options(headers: {'Range': 'bytes=0-1'}, validateStatus: (s) => s != null));
+            final r2 = await dio.get(t.previewUrl!,
+                options: Options(
+                    headers: {'Range': 'bytes=0-1'},
+                    validateStatus: (s) => s != null));
             final sc2 = r2.statusCode ?? 0;
-            if (sc2 == 401 || sc2 == 403) continue;
+            if (sc2 == 401 || sc2 == 403) {
+              // Log 403 error to CSV
+              await TrackErrorLogger.log403Error(t,
+                  errorDetails: 'Ranged GET (after 405) returned $sc2');
+              continue;
+            }
             if (sc2 >= 400 && sc2 < 500) continue;
             out.add(t);
             _availabilityStatus[url] = true;
@@ -440,9 +540,17 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       } catch (e) {
         // HEAD may error (network, CORS, etc.); try a ranged GET to minimize transfer
         try {
-          final r2 = await dio.get(t.previewUrl!, options: Options(headers: {'Range': 'bytes=0-1'}, validateStatus: (s) => s != null));
+          final r2 = await dio.get(t.previewUrl!,
+              options: Options(
+                  headers: {'Range': 'bytes=0-1'},
+                  validateStatus: (s) => s != null));
           final sc2 = r2.statusCode ?? 0;
-          if (sc2 == 401 || sc2 == 403) continue;
+          if (sc2 == 401 || sc2 == 403) {
+            // Log 403 error to CSV
+            await TrackErrorLogger.log403Error(t,
+                errorDetails: 'Ranged GET (after HEAD error) returned $sc2');
+            continue;
+          }
           if (sc2 >= 400 && sc2 < 500) continue;
           _availabilityStatus[url] = true;
           _availabilityExpiry[url] = DateTime.now().add(_availabilityTTL);
@@ -468,16 +576,21 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       if (t.previewUrl == null) continue; // simulated tracks are fine
       bool forbidden = false;
       try {
-        final r = await dio.head(t.previewUrl!, options: Options(validateStatus: (s) => s != null));
+        final r = await dio.head(t.previewUrl!,
+            options: Options(validateStatus: (s) => s != null));
         final sc = r.statusCode ?? 0;
         if (sc == 401 || sc == 403) {
           forbidden = true;
         } else if (sc == 405) {
           // HEAD not allowed -> try ranged GET fallback
           try {
-            final r2 = await dio.get(t.previewUrl!, options: Options(headers: {'Range': 'bytes=0-1'}, validateStatus: (s) => s != null));
+            final r2 = await dio.get(t.previewUrl!,
+                options: Options(
+                    headers: {'Range': 'bytes=0-1'},
+                    validateStatus: (s) => s != null));
             final sc2 = r2.statusCode ?? 0;
-            if (sc2 == 401 || sc2 == 403 || (sc2 >= 400 && sc2 < 500)) forbidden = true;
+            if (sc2 == 401 || sc2 == 403 || (sc2 >= 400 && sc2 < 500))
+              forbidden = true;
           } catch (_) {
             // network error -> be conservative and do not remove
             forbidden = false;
@@ -488,15 +601,23 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       } catch (_) {
         // HEAD may fail; try ranged GET
         try {
-          final r2 = await dio.get(t.previewUrl!, options: Options(headers: {'Range': 'bytes=0-1'}, validateStatus: (s) => s != null));
+          final r2 = await dio.get(t.previewUrl!,
+              options: Options(
+                  headers: {'Range': 'bytes=0-1'},
+                  validateStatus: (s) => s != null));
           final sc2 = r2.statusCode ?? 0;
-          if (sc2 == 401 || sc2 == 403 || (sc2 >= 400 && sc2 < 500)) forbidden = true;
+          if (sc2 == 401 || sc2 == 403 || (sc2 >= 400 && sc2 < 500))
+            forbidden = true;
         } catch (_) {
           // network error -> don't remove aggressively
           forbidden = false;
         }
       }
       if (forbidden) {
+        // Log 403 error to CSV
+        await TrackErrorLogger.log403Error(t,
+            errorDetails: 'Queue scan found 403/4xx error');
+
         final wasCurrent = i == state.currentIndex;
         removeAt(i);
         removed++;
@@ -527,7 +648,12 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
     int newCurrentIndex = state.currentIndex;
     Track? newCurrent = state.current;
     if (newQueue.isEmpty) {
-      state = state.copyWith(queue: [], currentIndex: -1, current: null, playing: false, position: Duration.zero);
+      state = state.copyWith(
+          queue: [],
+          currentIndex: -1,
+          current: null,
+          playing: false,
+          position: Duration.zero);
       _tick?.cancel();
       return;
     }
@@ -543,7 +669,8 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       // dịch currentIndex về trước 1
       newCurrentIndex = state.currentIndex - 1;
     }
-    state = state.copyWith(queue: newQueue, currentIndex: newCurrentIndex, current: newCurrent);
+    state = state.copyWith(
+        queue: newQueue, currentIndex: newCurrentIndex, current: newCurrent);
     _schedulePersist();
   }
 
@@ -586,8 +713,10 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
     } else {
       // tắt shuffle: khôi phục originalQueue và định vị current
       final current = state.current;
-      List<Track> base = state.originalQueue.isNotEmpty ? state.originalQueue : state.queue;
-      int idx = current == null ? -1 : base.indexWhere((t) => t.id == current.id);
+      List<Track> base =
+          state.originalQueue.isNotEmpty ? state.originalQueue : state.queue;
+      int idx =
+          current == null ? -1 : base.indexWhere((t) => t.id == current.id);
       state = state.copyWith(queue: base, shuffle: false, currentIndex: idx);
     }
   }
@@ -605,8 +734,11 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
   Future<void> seek(Duration position) async {
     final cur = state.current;
     if (cur == null) return;
-    final dur = Duration(milliseconds: cur.durationMs == 0 ? 180000 : cur.durationMs);
-    final clipped = position > dur ? dur : (position < Duration.zero ? Duration.zero : position);
+    final dur =
+        Duration(milliseconds: cur.durationMs == 0 ? 180000 : cur.durationMs);
+    final clipped = position > dur
+        ? dur
+        : (position < Duration.zero ? Duration.zero : position);
     // If this is a simulated track (no preview) => update UI position
     if (cur.previewUrl == null) {
       state = state.copyWith(position: clipped);
@@ -618,7 +750,8 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
     final audioDuration = _audio.duration;
     if (audioDuration == null || audioDuration.inMilliseconds == 0) {
       // stream likely not seekable (e.g., remote stream without length) -> inform user and do not update UI position
-      ref.read(audioErrorProvider.notifier).state = 'Nguồn audio không hỗ trợ seek';
+      ref.read(audioErrorProvider.notifier).state =
+          'Nguồn audio không hỗ trợ seek';
       return;
     }
 
@@ -631,19 +764,22 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       final diff = (actual.inMilliseconds - clipped.inMilliseconds).abs();
       if (actual.inMilliseconds <= 1000 && clipped.inMilliseconds > 1000) {
         // restarted from the beginning
-        ref.read(audioErrorProvider.notifier).state = 'Seek không được hỗ trợ bởi nguồn audio (về đầu).';
+        ref.read(audioErrorProvider.notifier).state =
+            'Seek không được hỗ trợ bởi nguồn audio (về đầu).';
         // Do not update UI position to avoid confusion; rely on positionStream to reflect reality
         return;
       }
       if (diff > 2000) {
         // too far off from requested position
-        ref.read(audioErrorProvider.notifier).state = 'Seek không chính xác (vị trí thực tế khác vị trí yêu cầu).';
+        ref.read(audioErrorProvider.notifier).state =
+            'Seek không chính xác (vị trí thực tế khác vị trí yêu cầu).';
       }
       // Update state to the actual position for consistency
       state = state.copyWith(position: actual);
       _schedulePersist();
     } catch (e) {
-      ref.read(audioErrorProvider.notifier).state = 'Seek thất bại: ${e.toString()}';
+      ref.read(audioErrorProvider.notifier).state =
+          'Seek thất bại: ${e.toString()}';
     }
   }
 
@@ -709,7 +845,8 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
     final repo = ref.read(interactionRepositoryProvider);
     final seconds = state.position.inSeconds;
     // If previewUrl points to our Deezer proxy, send as external play
-    if (track.previewUrl != null && track.previewUrl!.contains('/deezer/stream/')) {
+    if (track.previewUrl != null &&
+        track.previewUrl!.contains('/deezer/stream/')) {
       try {
         // extract external id from URL path /deezer/stream/{id}
         final uri = Uri.parse(track.previewUrl!);
@@ -718,13 +855,21 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
         final idx = segments.indexOf('stream');
         if (idx >= 0 && idx + 1 < segments.length) extId = segments[idx + 1];
         if (extId != null) {
-          await repo.logExternalPlay(externalTrackId: extId, seconds: seconds, completed: completed, milestone: milestone);
+          await repo.logExternalPlay(
+              externalTrackId: extId,
+              seconds: seconds,
+              completed: completed,
+              milestone: milestone);
         }
       } catch (_) {}
       return;
     }
     try {
-      await repo.logPlay(trackId: int.tryParse(track.id) ?? 0, seconds: seconds, completed: completed, milestone: milestone);
+      await repo.logPlay(
+          trackId: int.tryParse(track.id) ?? 0,
+          seconds: seconds,
+          completed: completed,
+          milestone: milestone);
       _loggedTrackId ??= int.tryParse(track.id);
     } catch (_) {}
   }
@@ -745,28 +890,39 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       if (cur == null || !state.playing) return;
       final totalMs = cur.durationMs == 0 ? 180000 : cur.durationMs;
       final dur = Duration(milliseconds: totalMs);
-      var pos = state.position; // kept in sync by positionStream when real audio
+      var pos =
+          state.position; // kept in sync by positionStream when real audio
       // Fallback: nếu just_audio chưa cập nhật (vd. load lỗi) mà position không tăng, tự tăng thủ công
       if (_audio.playing && _audio.duration == null) {
         // no duration yet; skip manual increment
-      } else if (_audio.playing && _audio.position == Duration.zero && pos == Duration.zero) {
+      } else if (_audio.playing &&
+          _audio.position == Duration.zero &&
+          pos == Duration.zero) {
         // might still be buffering first second; allow
       } else if (!_audio.playing && state.playing && cur.previewUrl == null) {
         // simulated track (no real audio) -> increment
         pos += const Duration(seconds: 1);
         state = state.copyWith(position: pos);
       }
-      double progress = dur.inMilliseconds == 0 ? 0 : pos.inMilliseconds / dur.inMilliseconds;
+      double progress =
+          dur.inMilliseconds == 0 ? 0 : pos.inMilliseconds / dur.inMilliseconds;
       _milestonesHit ??= <String, Set<int>>{};
       final tid = cur.id;
       final msSet = _milestonesHit![tid] ?? <int>{};
-      bool mark(int pct){
-        if (msSet.contains(pct)) return false; msSet.add(pct); _milestonesHit![tid] = msSet; return true;
+      bool mark(int pct) {
+        if (msSet.contains(pct)) return false;
+        msSet.add(pct);
+        _milestonesHit![tid] = msSet;
+        return true;
       }
+
       if (pos >= dur) {
         if (mark(100)) _logInteraction(completed: true, milestone: 100);
         if (state.repeatMode == RepeatMode.one) {
-          // restart track
+          // restart track - reset milestones for replay
+          _milestonesHit?.remove(cur.id);
+          _loggedTrackId = null;
+
           _audio.seek(Duration.zero);
           _audio.play();
           state = state.copyWith(position: Duration.zero, playing: true);
@@ -844,7 +1000,7 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
         final savedAt = DateTime.tryParse(savedAtStr);
         if (savedAt != null) {
           final age = DateTime.now().difference(savedAt);
-            if (age > persistTTL) {
+          if (age > persistTTL) {
             return; // quá cũ không khôi phục
           }
         }
@@ -881,7 +1037,7 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
         orElse: () => RepeatMode.off,
       );
       final playing = map['playing'] ?? false;
-  final origin = (map['origin'] as Map<String, dynamic>?) ;
+      final origin = (map['origin'] as Map<String, dynamic>?);
       Track? current;
       if (currentIndex >= 0 && currentIndex < queue.length) {
         current = queue[currentIndex];
@@ -923,9 +1079,9 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
         final updated = map[old.id];
         if (updated != null) {
           // Compare a few key fields
-            if (updated.title != old.title ||
-                updated.artistName != old.artistName ||
-                updated.durationMs != old.durationMs) {
+          if (updated.title != old.title ||
+              updated.artistName != old.artistName ||
+              updated.durationMs != old.durationMs) {
             changed = true;
           }
           newQueue.add(updated);
@@ -952,7 +1108,8 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
         if (curIndex >= 0 && curIndex < newQueue.length) {
           newCurrent = newQueue[curIndex];
         }
-        state = state.copyWith(queue: newQueue, originalQueue: newOriginal, current: newCurrent);
+        state = state.copyWith(
+            queue: newQueue, originalQueue: newOriginal, current: newCurrent);
         _schedulePersist();
       }
     } catch (_) {
@@ -961,4 +1118,6 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
   }
 }
 
-final playerControllerProvider = StateNotifierProvider<PlayerController, PlayerStateModel>((ref) => PlayerController(ref));
+final playerControllerProvider =
+    StateNotifierProvider<PlayerController, PlayerStateModel>(
+        (ref) => PlayerController(ref));

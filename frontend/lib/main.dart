@@ -4,11 +4,19 @@ import 'core/theme/app_theme.dart';
 import 'core/routing/app_router.dart';
 import 'features/auth/application/auth_providers.dart';
 import 'features/like/application/like_providers.dart';
+import 'shared/services/track_error_logger.dart';
+import 'shared/services/shuffle_state_manager.dart';
 
 /// Ensure the auth token is loaded from secure storage before the app starts
 /// so that Dio interceptors can attach Authorization headers on first requests.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize shuffle state manager (clears old session data)
+  await ShuffleStateManager.initialize();
+
+  // Print CSV log file location for debugging
+  await TrackErrorLogger.printLogFilePath();
 
   // Create a ProviderContainer so we can call the auth loader before runApp
   final container = ProviderContainer();
@@ -19,7 +27,8 @@ Future<void> main() async {
     await container.read(likedTracksProvider.notifier).ensureLoaded();
   } catch (_) {}
 
-  runApp(UncontrolledProviderScope(container: container, child: const AppRoot()));
+  runApp(
+      UncontrolledProviderScope(container: container, child: const AppRoot()));
 }
 
 class AppRoot extends ConsumerWidget {
@@ -41,7 +50,8 @@ class AppRoot extends ConsumerWidget {
         final baseWidth = 390.0; // target logical width for 6.1" devices
         final scale = (mq.size.width / baseWidth).clamp(0.85, 1.15);
         // Apply a text scale factor only (keeps layout mostly intact while improving readability)
-        return MediaQuery(data: mq.copyWith(textScaleFactor: scale), child: child!);
+        return MediaQuery(
+            data: mq.copyWith(textScaleFactor: scale), child: child!);
       },
     );
   }

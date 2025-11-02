@@ -12,6 +12,7 @@ import '../../playlist/application/playlist_providers.dart';
 import '../../../data/models/track.dart';
 import '../../../data/repositories/track_repository.dart';
 import 'conversational_mood_chat_widget.dart';
+import '../../../shared/services/shuffle_state_manager.dart';
 
 class RecommendScreen extends ConsumerStatefulWidget {
   final List<Map<String, dynamic>>? playlists;
@@ -39,10 +40,38 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
   String? _behaviorTracksError;
   List<Map<String, dynamic>> _behaviorTracks = [];
 
+  // Shuffle state for virtual playlists section
+  List<Map<String, dynamic>>? _virtualPlaylistsShuffled;
+
   @override
   void initState() {
     super.initState();
+    _loadShuffleState();
     _initializeData();
+  }
+
+  @override
+  void dispose() {
+    _saveShuffleState();
+    super.dispose();
+  }
+
+  String get _screenKey => 'recommend_virtual_playlists';
+
+  void _loadShuffleState() {
+    final savedState = ShuffleStateManager.loadShuffleState(_screenKey);
+    if (savedState != null) {
+      _virtualPlaylistsShuffled =
+          savedState['shuffled'] as List<Map<String, dynamic>>;
+    }
+  }
+
+  void _saveShuffleState() {
+    if (_virtualPlaylistsShuffled != null &&
+        _virtualPlaylistsShuffled!.isNotEmpty) {
+      ShuffleStateManager.saveShuffleState(
+          _screenKey, _virtualPlaylistsShuffled!, 0);
+    }
   }
 
   void _initializeData() {
@@ -876,12 +905,37 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
     if (_artistTracks.isEmpty) return <Widget>[];
 
     final List<Widget> tiles = [];
-    final shuffled = List<Map<String, dynamic>>.from(_artistTracks);
-    shuffled.shuffle(Random());
+
+    // Use saved shuffle state or create new one
+    List<Map<String, dynamic>> shuffled;
+    if (_virtualPlaylistsShuffled != null &&
+        _virtualPlaylistsShuffled!.isNotEmpty) {
+      // Verify saved state matches current tracks (in case data changed)
+      final currentIds = _artistTracks.map((e) => e['id']).toSet();
+      final savedIds = _virtualPlaylistsShuffled!.map((e) => e['id']).toSet();
+      if (currentIds.length == savedIds.length &&
+          currentIds.containsAll(savedIds)) {
+        shuffled = _virtualPlaylistsShuffled!;
+      } else {
+        // Data changed, create new shuffle
+        shuffled = List<Map<String, dynamic>>.from(_artistTracks);
+        shuffled.shuffle(Random());
+        _virtualPlaylistsShuffled = shuffled;
+        _saveShuffleState();
+      }
+    } else {
+      // First time, create shuffle
+      shuffled = List<Map<String, dynamic>>.from(_artistTracks);
+      shuffled.shuffle(Random());
+      _virtualPlaylistsShuffled = shuffled;
+      _saveShuffleState();
+    }
+
     final chunks = <List<Map<String, dynamic>>>[];
     for (var i = 0; i < shuffled.length; i += 20) {
       chunks.add(shuffled.sublist(i, (i + 20).clamp(0, shuffled.length)));
     }
+
     if (chunks.isEmpty) return <Widget>[];
     tiles.add(_buildSectionHeader(context, 'Playlist nghệ sĩ tổng hợp'));
     tiles.add(const SizedBox(height: 8));

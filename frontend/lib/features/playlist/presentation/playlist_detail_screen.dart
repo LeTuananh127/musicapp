@@ -6,13 +6,16 @@ import '../application/playlist_providers.dart';
 import '../../like/application/like_providers.dart';
 import '../../player/application/player_providers.dart';
 import '../../../data/models/track.dart';
+import '../../../shared/providers/dio_provider.dart';
+import '../../../shared/services/shuffle_state_manager.dart';
 
 class PlaylistDetailScreen extends ConsumerStatefulWidget {
   final int playlistId;
   const PlaylistDetailScreen({super.key, required this.playlistId});
 
   @override
-  ConsumerState<PlaylistDetailScreen> createState() => _PlaylistDetailScreenState();
+  ConsumerState<PlaylistDetailScreen> createState() =>
+      _PlaylistDetailScreenState();
 }
 
 class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
@@ -22,16 +25,42 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   int _pageIndex = 0;
   bool _initializedForPlaylist = false;
 
+  @override
+  void dispose() {
+    // Save shuffle state when leaving screen
+    _saveShuffleState();
+    super.dispose();
+  }
+
+  String get _screenKey =>
+      ShuffleStateManager.playlistDetailKey(widget.playlistId);
+
+  void _saveShuffleState() {
+    if (_shuffled.isNotEmpty) {
+      ShuffleStateManager.saveShuffleState(_screenKey, _shuffled, _pageIndex);
+    }
+  }
+
   void _prepareChunks(List<dynamic> list) {
-    // produce a shuffled copy and split into pages of 20
-    final copy = list.map((e) => e).toList().cast<Map<String, dynamic>>();
-    copy.shuffle(Random());
-    _shuffled = copy;
+    // Try to load saved shuffle state from current session
+    final savedState = ShuffleStateManager.loadShuffleState(_screenKey);
+
+    if (savedState != null) {
+      // Restore saved shuffle state
+      _shuffled = savedState['shuffled'] as List<Map<String, dynamic>>;
+      _pageIndex = savedState['pageIndex'] as int;
+    } else {
+      // Create new shuffle
+      final copy = list.map((e) => e).toList().cast<Map<String, dynamic>>();
+      copy.shuffle(Random());
+      _shuffled = copy;
+      _pageIndex = 0;
+    }
+
     _chunks = [];
     for (var i = 0; i < _shuffled.length; i += 20) {
       _chunks.add(_shuffled.sublist(i, (i + 20).clamp(0, _shuffled.length)));
     }
-    _pageIndex = 0;
     _initializedForPlaylist = true;
   }
 
@@ -43,6 +72,8 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         _chunks.add(_shuffled.sublist(i, (i + 20).clamp(0, _shuffled.length)));
       }
       _pageIndex = 0;
+      // Save new shuffle state
+      _saveShuffleState();
     });
   }
 
@@ -51,7 +82,8 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     final playlistId = widget.playlistId;
     final detail = ref.watch(playlistDetailProvider(playlistId));
     final tracks = ref.watch(playlistTracksProvider(playlistId));
-    final removeCtrl = ref.watch(playlistTrackRemoveControllerProvider(playlistId));
+    final removeCtrl =
+        ref.watch(playlistTrackRemoveControllerProvider(playlistId));
     return Scaffold(
       appBar: AppBar(
         title: detail.when(
@@ -67,21 +99,31 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
               tracksData.whenOrNull(data: (list) {
                 if (list.isEmpty) return;
                 // ensure we play the entire shuffled queue if prepared, otherwise play full list
-                final queueSource = _shuffled.isNotEmpty ? _shuffled : list.map((e) => {
-                      'id': e.trackId,
-                      'title': e.title ?? 'Track ${e.trackId}',
-                      'artist_name': 'N/A',
-                      'duration_ms': e.durationMs ?? 180000,
-                    }).toList();
+                final queueSource = _shuffled.isNotEmpty
+                    ? _shuffled
+                    : list
+                        .map((e) => {
+                              'id': e.trackId,
+                              'title': e.title ?? 'Track ${e.trackId}',
+                              'artist_name': 'N/A',
+                              'duration_ms': e.durationMs ?? 180000,
+                            })
+                        .toList();
                 final queue = queueSource
                     .map((e) => Track(
                           id: (e['id'] ?? e['trackId']).toString(),
-                          title: e['title'] ?? 'Track ${(e['id'] ?? e['trackId']).toString()}',
+                          title: e['title'] ??
+                              'Track ${(e['id'] ?? e['trackId']).toString()}',
                           artistName: e['artist_name'] ?? 'N/A',
-                          durationMs: (e['duration_ms'] ?? e['durationMs'] ?? 180000) as int,
+                          durationMs: (e['duration_ms'] ??
+                              e['durationMs'] ??
+                              180000) as int,
                         ))
                     .toList();
-                if (queue.isNotEmpty) ref.read(playerControllerProvider.notifier).playQueue(queue, 0, origin: {'type': 'playlist', 'playlistId': playlistId});
+                if (queue.isNotEmpty)
+                  ref.read(playerControllerProvider.notifier).playQueue(
+                      queue, 0,
+                      origin: {'type': 'playlist', 'playlistId': playlistId});
               });
             },
             icon: const Icon(Icons.play_arrow),
@@ -111,7 +153,8 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
               String extra = '';
               tracksData.whenOrNull(data: (list) {
                 if (list.isNotEmpty) {
-                  final totalMs = list.fold<int>(0, (sum, e) => sum + (e.durationMs ?? 0));
+                  final totalMs =
+                      list.fold<int>(0, (sum, e) => sum + (e.durationMs ?? 0));
                   if (totalMs > 0) {
                     final dur = Duration(milliseconds: totalMs);
                     final h = dur.inHours;
@@ -124,7 +167,8 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
               });
               return ListTile(
                 title: Text(d.description ?? ''),
-                subtitle: Text('${d.trackCount} tracks • ${d.isPublic ? 'Public' : 'Private'}$extra'),
+                subtitle: Text(
+                    '${d.trackCount} tracks • ${d.isPublic ? 'Public' : 'Private'}$extra'),
               );
             },
             loading: () => const LinearProgressIndicator(minHeight: 2),
@@ -138,40 +182,52 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                   : Builder(builder: (ctx) {
                       // initialize shuffle/chunks once per playlist load
                       if (!_initializedForPlaylist) {
-                        _prepareChunks(list.map((e) => {
-                          'id': e.trackId,
-                          'title': e.title ?? 'Track ${e.trackId}',
-                          'artist_name': 'N/A',
-                          'duration_ms': e.durationMs ?? 0,
-                        }).toList());
+                        _prepareChunks(list
+                            .map((e) => {
+                                  'id': e.trackId,
+                                  'title': e.title ?? 'Track ${e.trackId}',
+                                  'artist_name': 'N/A',
+                                  'duration_ms': e.durationMs ?? 0,
+                                  'cover_url': '',
+                                  'preview_url': '',
+                                })
+                            .toList());
                       }
 
                       final pageCount = _chunks.isEmpty ? 1 : _chunks.length;
-                      final currentChunk = _chunks.isEmpty ? <Map<String, dynamic>>[] : _chunks[_pageIndex.clamp(0, pageCount - 1)];
+                      final currentChunk = _chunks.isEmpty
+                          ? <Map<String, dynamic>>[]
+                          : _chunks[_pageIndex.clamp(0, pageCount - 1)];
 
                       return Column(
                         children: [
                           // paging & shuffle controls
                           Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 6),
                             child: Row(
                               children: [
                                 IconButton(
                                   tooltip: 'Prev page',
                                   icon: const Icon(Icons.chevron_left),
-                                  onPressed: _pageIndex > 0 ? () => setState(() => _pageIndex -= 1) : null,
+                                  onPressed: _pageIndex > 0
+                                      ? () => setState(() => _pageIndex -= 1)
+                                      : null,
                                 ),
                                 Text('Page ${_pageIndex + 1} / $pageCount'),
                                 IconButton(
                                   tooltip: 'Next page',
                                   icon: const Icon(Icons.chevron_right),
-                                  onPressed: _pageIndex < pageCount - 1 ? () => setState(() => _pageIndex += 1) : null,
+                                  onPressed: _pageIndex < pageCount - 1
+                                      ? () => setState(() => _pageIndex += 1)
+                                      : null,
                                 ),
                                 const Spacer(),
                                 IconButton(
                                   tooltip: 'Shuffle',
                                   icon: const Icon(Icons.shuffle),
-                                  onPressed: _shuffled.isEmpty ? null : _reshuffle,
+                                  onPressed:
+                                      _shuffled.isEmpty ? null : _reshuffle,
                                 ),
                               ],
                             ),
@@ -182,67 +238,183 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                                 ? const Center(child: Text('Playlist trống'))
                                 : ListView.separated(
                                     itemCount: currentChunk.length,
-                                    separatorBuilder: (_, __) => const Divider(height: 1),
+                                    separatorBuilder: (_, __) =>
+                                        const Divider(height: 1),
                                     itemBuilder: (c, idx) {
                                       final t = currentChunk[idx];
-                                      final globalIndex = _shuffled.indexWhere((e) => (e['id']).toString() == t['id'].toString());
-                                      final liked = ref.watch(likedTracksProvider).contains(int.tryParse(t['id'].toString()) ?? -1);
-                                      final player = ref.watch(playerControllerProvider);
-                                      final isCurrent = player.current?.id == t['id'].toString();
-                                      final playing = isCurrent && player.playing;
-                                      final durMs = (t['duration_ms'] as int?) ?? 0;
+                                      final globalIndex = _shuffled.indexWhere(
+                                          (e) =>
+                                              (e['id']).toString() ==
+                                              t['id'].toString());
+                                      final liked = ref
+                                          .watch(likedTracksProvider)
+                                          .contains(int.tryParse(
+                                                  t['id'].toString()) ??
+                                              -1);
+                                      final player =
+                                          ref.watch(playerControllerProvider);
+                                      final isCurrent = player.current?.id ==
+                                          t['id'].toString();
+                                      final playing =
+                                          isCurrent && player.playing;
+                                      final durMs =
+                                          (t['duration_ms'] as int?) ?? 0;
                                       String fmt(int ms) {
                                         final d = Duration(milliseconds: ms);
-                                        final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-                                        final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+                                        final m = d.inMinutes
+                                            .remainder(60)
+                                            .toString()
+                                            .padLeft(2, '0');
+                                        final s = d.inSeconds
+                                            .remainder(60)
+                                            .toString()
+                                            .padLeft(2, '0');
                                         return '$m:$s';
                                       }
-                                      final playerState = ref.watch(playerControllerProvider);
-                                      final currentPos = isCurrent ? playerState.position : Duration.zero;
+
+                                      final playerState =
+                                          ref.watch(playerControllerProvider);
+                                      final currentPos = isCurrent
+                                          ? playerState.position
+                                          : Duration.zero;
                                       String posStr = '';
                                       if (isCurrent) {
-                                        final total = Duration(milliseconds: durMs == 0 ? 1 : durMs);
+                                        final total = Duration(
+                                            milliseconds:
+                                                durMs == 0 ? 1 : durMs);
                                         String fmtD(Duration d) {
-                                          final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-                                          final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+                                          final m = d.inMinutes
+                                              .remainder(60)
+                                              .toString()
+                                              .padLeft(2, '0');
+                                          final s = d.inSeconds
+                                              .remainder(60)
+                                              .toString()
+                                              .padLeft(2, '0');
                                           return '$m:$s';
                                         }
-                                        posStr = ' • ${fmtD(currentPos)} / ${fmtD(total)}';
+
+                                        posStr =
+                                            ' • ${fmtD(currentPos)} / ${fmtD(total)}';
                                       }
+
+                                      // Build album cover
+                                      final rawCover =
+                                          (t['cover_url'] as String?) ?? '';
+                                      final cfg = ref.read(appConfigProvider);
+                                      String resolvedCover = '';
+                                      if (rawCover.isNotEmpty) {
+                                        if (rawCover.startsWith('http')) {
+                                          resolvedCover = rawCover;
+                                        } else {
+                                          final base = cfg.apiBaseUrl;
+                                          resolvedCover =
+                                              '$base${rawCover.startsWith('/') ? '' : '/'}$rawCover';
+                                        }
+                                      }
+                                      Widget leadingWidget;
+                                      if (resolvedCover.isNotEmpty) {
+                                        leadingWidget = ClipOval(
+                                          child: Image.network(
+                                            resolvedCover,
+                                            width: 48,
+                                            height: 48,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (_, __, ___) =>
+                                                Container(
+                                              width: 48,
+                                              height: 48,
+                                              color: Colors.grey.shade200,
+                                              child: const Icon(
+                                                  Icons.music_note,
+                                                  color: Colors.black54),
+                                            ),
+                                          ),
+                                        );
+                                      } else {
+                                        leadingWidget = CircleAvatar(
+                                          backgroundColor: Colors.grey.shade200,
+                                          child: const Icon(Icons.music_note,
+                                              color: Colors.black54),
+                                        );
+                                      }
+
                                       return ListTile(
-                                        key: ValueKey('pl-$playlistId-${t['id']}'),
-                                        leading: CircleAvatar(backgroundColor: isCurrent ? Colors.green.shade600 : null, child: Text('${globalIndex + 1}')),
+                                        key: ValueKey(
+                                            'pl-$playlistId-${t['id']}'),
+                                        leading: SizedBox(
+                                            width: 48,
+                                            height: 48,
+                                            child: leadingWidget),
                                         title: Text(
                                           t['title'] ?? 'Track ${t['id']}',
-                                          style: isCurrent ? const TextStyle(fontWeight: FontWeight.bold) : null,
+                                          style: isCurrent
+                                              ? const TextStyle(
+                                                  fontWeight: FontWeight.bold)
+                                              : null,
                                         ),
-                                        subtitle: Text('${durMs > 0 ? fmt(durMs) : '--:--'}$posStr • ID: ${t['id']}'),
-                                        tileColor: isCurrent ? Colors.green.withOpacity(0.08) : null,
+                                        subtitle: Text(
+                                            '${t['artist_name'] ?? 'N/A'} • ${durMs > 0 ? fmt(durMs) : '--:--'}$posStr'),
+                                        tileColor: isCurrent
+                                            ? Colors.green.withOpacity(0.08)
+                                            : null,
                                         trailing: Wrap(
                                           spacing: 4,
                                           children: [
                                             IconButton(
-                                              tooltip: liked ? 'Bỏ thích' : 'Thích',
-                                              icon: Icon(liked ? Icons.favorite : Icons.favorite_border, color: liked ? Colors.red : null),
-                                              onPressed: () => ref.read(likedTracksProvider.notifier).toggle(int.tryParse(t['id'].toString()) ?? -1),
+                                              tooltip:
+                                                  liked ? 'Bỏ thích' : 'Thích',
+                                              icon: Icon(
+                                                  liked
+                                                      ? Icons.favorite
+                                                      : Icons.favorite_border,
+                                                  color: liked
+                                                      ? Colors.red
+                                                      : null),
+                                              onPressed: () => ref
+                                                  .read(likedTracksProvider
+                                                      .notifier)
+                                                  .toggle(int.tryParse(
+                                                          t['id'].toString()) ??
+                                                      -1),
                                             ),
                                             IconButton(
-                                              tooltip: playing ? 'Tạm dừng' : 'Phát',
-                                              icon: Icon(playing ? Icons.pause_circle_filled : Icons.play_circle_fill),
+                                              tooltip:
+                                                  playing ? 'Tạm dừng' : 'Phát',
+                                              icon: Icon(playing
+                                                  ? Icons.pause_circle_filled
+                                                  : Icons.play_circle_fill),
                                               onPressed: () {
-                                                final ctrl = ref.read(playerControllerProvider.notifier);
+                                                final ctrl = ref.read(
+                                                    playerControllerProvider
+                                                        .notifier);
                                                 // build queue from shuffled list so next/previous work across full set
                                                 final queue = _shuffled
                                                     .map((e) => Track(
-                                                          id: (e['id']).toString(),
-                                                          title: e['title'] ?? 'Track ${(e['id']).toString()}',
-                                                          artistName: e['artist_name'] ?? 'N/A',
-                                                          durationMs: (e['duration_ms'] as int?) ?? 180000,
+                                                          id: (e['id'])
+                                                              .toString(),
+                                                          title: e['title'] ??
+                                                              'Track ${(e['id']).toString()}',
+                                                          artistName:
+                                                              e['artist_name'] ??
+                                                                  'N/A',
+                                                          durationMs:
+                                                              (e['duration_ms']
+                                                                      as int?) ??
+                                                                  180000,
                                                         ))
                                                     .toList();
-                                                  if (!isCurrent) {
-                                                  final startIndex = globalIndex >= 0 ? globalIndex : 0;
-                                                  ctrl.playQueue(queue, startIndex, origin: {'type': 'playlist', 'playlistId': playlistId});
+                                                if (!isCurrent) {
+                                                  final startIndex =
+                                                      globalIndex >= 0
+                                                          ? globalIndex
+                                                          : 0;
+                                                  ctrl.playQueue(
+                                                      queue, startIndex,
+                                                      origin: {
+                                                        'type': 'playlist',
+                                                        'playlistId': playlistId
+                                                      });
                                                 } else {
                                                   ctrl.togglePlay();
                                                 }
@@ -250,21 +422,33 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                                             ),
                                             IconButton(
                                               tooltip: 'Xóa',
-                                              icon: const Icon(Icons.delete_outline),
-                                              onPressed: removeCtrl is AsyncLoading
-                                                  ? null
-                                                  : () async {
-                                                      // removing from original playlist still calls API as before
-                                                      await ref.read(playlistTrackRemoveControllerProvider(playlistId).notifier).remove(int.tryParse(t['id'].toString()) ?? -1);
-                                                      // invalidate so list reloads and shuffle state resets
-                                                      ref.invalidate(playlistTracksProvider(playlistId));
-                                                      setState(() {
-                                                        _initializedForPlaylist = false;
-                                                        _shuffled = [];
-                                                        _chunks = [];
-                                                        _pageIndex = 0;
-                                                      });
-                                                    },
+                                              icon: const Icon(
+                                                  Icons.delete_outline),
+                                              onPressed:
+                                                  removeCtrl is AsyncLoading
+                                                      ? null
+                                                      : () async {
+                                                          // removing from original playlist still calls API as before
+                                                          await ref
+                                                              .read(playlistTrackRemoveControllerProvider(
+                                                                      playlistId)
+                                                                  .notifier)
+                                                              .remove(int.tryParse(t[
+                                                                          'id']
+                                                                      .toString()) ??
+                                                                  -1);
+                                                          // invalidate so list reloads and shuffle state resets
+                                                          ref.invalidate(
+                                                              playlistTracksProvider(
+                                                                  playlistId));
+                                                          setState(() {
+                                                            _initializedForPlaylist =
+                                                                false;
+                                                            _shuffled = [];
+                                                            _chunks = [];
+                                                            _pageIndex = 0;
+                                                          });
+                                                        },
                                             ),
                                           ],
                                         ),
