@@ -33,7 +33,10 @@ class PlaylistTrackOut(BaseModel):
     position: int
     title: str | None = None
     artist_id: int | None = None
+    artist_name: str | None = None
     duration_ms: int | None = None
+    cover_url: str | None = None
+    preview_url: str | None = None
     class Config:
         from_attributes = True
 
@@ -90,26 +93,31 @@ def get_playlist(playlist_id: int, user_id: int = Depends(get_optional_user_id),
 @router.get('/{playlist_id}/tracks', response_model=list[PlaylistTrackOut])
 def playlist_tracks(playlist_id: int, user_id: int = Depends(get_optional_user_id), db: Session = Depends(get_db)):
     # allow unauthenticated read access to tracks of public playlists; owner can read private playlists
+    from ..models.music import Artist
     playlist = db.query(Playlist).filter(Playlist.id == playlist_id).first()
     if not playlist:
         raise HTTPException(status_code=404, detail="Playlist not found")
     if not playlist.is_public and playlist.user_id != user_id:
         raise HTTPException(status_code=404, detail="Playlist not found")
     rows = (
-        db.query(PlaylistTrack, Track)
+        db.query(PlaylistTrack, Track, Artist)
         .join(Track, Track.id == PlaylistTrack.track_id)
+        .outerjoin(Artist, Artist.id == Track.artist_id)
         .filter(PlaylistTrack.playlist_id == playlist_id)
         .order_by(PlaylistTrack.position.asc())
         .all()
     )
     out: list[PlaylistTrackOut] = []
-    for pt, t in rows:
+    for pt, t, artist in rows:
         out.append(PlaylistTrackOut(
             track_id=pt.track_id,
             position=pt.position,
             title=getattr(t, 'title', None),
             artist_id=getattr(t, 'artist_id', None),
-            duration_ms=getattr(t, 'duration_ms', None)
+            artist_name=getattr(artist, 'name', None) if artist else None,
+            duration_ms=getattr(t, 'duration_ms', None),
+            cover_url=getattr(t, 'cover_url', None),
+            preview_url=getattr(t, 'preview_url', None)
         ))
     return out
 

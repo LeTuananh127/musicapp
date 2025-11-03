@@ -55,12 +55,23 @@ class PlaylistScreen extends ConsumerWidget {
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(p.isPublic ? 'Public' : 'Private'),
-                          const SizedBox(width: 8),
-                          Icon(Icons.chevron_right, color: Theme.of(c).colorScheme.outline),
+                          // Edit button
+                          IconButton(
+                            icon: const Icon(Icons.edit_outlined),
+                            tooltip: 'Chỉnh sửa',
+                            onPressed: () => _showEditDialog(context, ref, p.id, p.name, p.description),
+                          ),
+                          // Delete button (red)
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, color: Colors.red),
+                            tooltip: 'Xóa',
+                            onPressed: () => _showDeleteDialog(context, ref, p.id, p.name),
+                          ),
                         ],
                       ),
-                      onTap: () => _showPlaylistActions(context, ref, p.id, p.name),
+                      onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => PlaylistDetailScreen(playlistId: p.id),
+                      )),
                     );
                   },
                 ),
@@ -105,30 +116,84 @@ class PlaylistScreen extends ConsumerWidget {
     );
   }
 
-  void _showPlaylistActions(BuildContext context, WidgetRef ref, int id, String name) {
-    showModalBottomSheet(
+  void _showEditDialog(BuildContext context, WidgetRef ref, int id, String name, String? description) {
+    final nameCtrl = TextEditingController(text: name);
+    final descCtrl = TextEditingController(text: description ?? '');
+    showDialog(
       context: context,
-      builder: (c) => SafeArea(
-        child: Wrap(
+      builder: (ctx) => AlertDialog(
+        title: const Text('Chỉnh sửa Playlist'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold))),
-            ListTile(
-              leading: const Icon(Icons.playlist_play),
-              title: const Text('Mở'),
-              onTap: () {
-                Navigator.pop(c);
-                Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => PlaylistDetailScreen(playlistId: id),
-                ));
-              },
+            TextField(
+              controller: nameCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Tên',
+                border: OutlineInputBorder(),
+              ),
             ),
-            ListTile(
-              leading: const Icon(Icons.close),
-              title: const Text('Đóng'),
-              onTap: () => Navigator.pop(c),
+            const SizedBox(height: 16),
+            TextField(
+              controller: descCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Mô tả',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 3,
             ),
           ],
         ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
+          FilledButton(
+            onPressed: () async {
+              final newName = nameCtrl.text.trim();
+              if (newName.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Tên playlist không được trống')),
+                );
+                return;
+              }
+              // TODO: Call API to update playlist
+              Navigator.pop(ctx);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Đã cập nhật playlist')),
+                );
+                ref.invalidate(myPlaylistsProvider);
+              }
+            },
+            child: const Text('Lưu'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDeleteDialog(BuildContext context, WidgetRef ref, int id, String name) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Xóa playlist?'),
+        content: Text('Bạn có chắc muốn xóa "$name"? Hành động này không thể hoàn tác.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              // TODO: Call API to delete playlist
+              Navigator.pop(ctx);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Đã xóa "$name"')),
+                );
+                ref.invalidate(myPlaylistsProvider);
+              }
+            },
+            child: const Text('Xóa'),
+          ),
+        ],
       ),
     );
   }

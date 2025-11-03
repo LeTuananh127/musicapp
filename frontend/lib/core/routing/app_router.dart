@@ -117,7 +117,8 @@ class AppRouter {
                 final ids = extra != null && extra['artistIds'] is List ? List<int>.from(extra['artistIds']) : <int>[];
                 final title = extra != null && extra['title'] is String ? extra['title'] as String : 'Playlist';
                 final tracks = extra != null && extra['tracks'] is List ? List<Map<String, dynamic>>.from(extra['tracks']) : null;
-                return VirtualPlaylistScreen(artistIds: ids.isEmpty ? null : ids, tracks: tracks, title: title);
+                final preserveOrder = extra != null && extra['preserveOrder'] is bool ? extra['preserveOrder'] as bool : false;
+                return VirtualPlaylistScreen(artistIds: ids.isEmpty ? null : ids, tracks: tracks, title: title, preserveOrder: preserveOrder);
               }),
               GoRoute(
                 path: '/playlists/:id',

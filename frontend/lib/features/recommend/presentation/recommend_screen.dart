@@ -597,12 +597,15 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
       final base = ref.read(appConfigProvider).apiBaseUrl;
       final uid = auth.userId;
       if (uid == null) return [];
-      final res = await dio.get('$base/recommend/user/$uid',
+      
+      // Use ML recommendation endpoint with exclude_listened=false (recommend what user likes)
+      final res = await dio.get('$base/recommend/user/$uid/ml?limit=20&exclude_listened=false',
           options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}));
+      
       final List data =
           res.data is Map ? res.data['value'] ?? res.data : res.data;
-      // data contains items like {track_id, score}. We need track metadata; for now assume backend returns track metadata in this endpoint, else frontend will show minimal info.
-      // Try to map directly; if only ids present, return minimal entries.
+      
+      // ML endpoint returns full track metadata: {track_id, score, title, artist_name, duration_ms, cover_url, preview_url, ...}
       return data
           .map((e) {
             final tid = e['track_id'];
@@ -611,12 +614,37 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
                 : tid is String
                     ? int.tryParse(tid) ?? (tid.hashCode & 0x7fffffff)
                     : (tid?.hashCode ?? DateTime.now().millisecondsSinceEpoch);
+            
+            // Convert preview_url to use backend proxy to avoid Deezer CDN 403 errors
+            final rawPreview = e['preview_url'];
+            String? preview;
+            if (rawPreview == null) {
+              preview = null;
+            } else {
+              final rp = rawPreview.toString();
+              if (rp.startsWith('http')) {
+                if (rp.contains('cdnt-preview.dzcdn.net') ||
+                    rp.contains('cdns-preview.dzcdn.net') ||
+                    rp.contains('dzcdn.net')) {
+                  preview = '$base/deezer/stream/$parsedId';
+                } else {
+                  preview = rp;
+                }
+              } else {
+                preview = '$base${rp.startsWith('/') ? '' : '/'}$rp';
+              }
+            }
+            
             return {
               'id': parsedId,
               'track_id': tid,
               'title': e['title'] ?? 'Track $tid',
               'artist_name': e['artist_name'] ?? '',
+              'artist_id': e['artist_id'] ?? 0,
+              'album_id': e['album_id'],
               'duration_ms': e['duration_ms'] ?? 0,
+              'cover_url': e['cover_url'],
+              'preview_url': preview,
               'score': e['score'],
             };
           })
@@ -833,6 +861,7 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
             extra: {
               'tracks': _topPlayedTracks,
               'title': 'Top lượt nghe',
+              'preserveOrder': true, // Keep tracks in sorted order
             },
           ),
         ),
@@ -845,7 +874,7 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildSectionHeader(context, 'Dựa trên hành vi nghe'),
+          _buildSectionHeader(context, '🤖 AI Gợi ý cho bạn'),
           const SizedBox(height: 12),
           const Center(child: CircularProgressIndicator()),
         ],
@@ -857,7 +886,7 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildSectionHeader(context, 'Dựa trên hành vi nghe'),
+            _buildSectionHeader(context, '🤖 AI Gợi ý cho bạn'),
             const SizedBox(height: 8),
             Text('Lỗi tải playlist đề xuất: $_behaviorTracksError'),
           ],
@@ -876,17 +905,17 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
           leading: CircleAvatar(
             backgroundColor:
                 Theme.of(context).colorScheme.secondary.withOpacity(0.15),
-            child: Icon(Icons.psychology_alt,
+            child: Icon(Icons.auto_awesome,
                 color: Theme.of(context).colorScheme.secondary),
           ),
-          title: const Text('Playlist dành riêng cho bạn'),
+          title: const Text('🤖 AI - Playlist dành riêng cho bạn'),
           subtitle: Text(preview, maxLines: 3, overflow: TextOverflow.ellipsis),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => context.push(
             '/virtual-playlist',
             extra: {
               'tracks': _behaviorTracks,
-              'title': 'Dựa vào hành vi nghe',
+              'title': '🤖 AI Gợi ý - Dựa vào sở thích của bạn',
             },
           ),
         ),
@@ -994,12 +1023,31 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
 
   Map<String, dynamic> _trackModelToMap(Track track) {
     final parsedId = int.tryParse(track.id) ?? (track.id.hashCode & 0x7fffffff);
+    final base = ref.read(appConfigProvider).apiBaseUrl;
+    
+    // Convert preview_url to use backend proxy to avoid Deezer CDN 403 errors
+    String? preview;
+    final rawPreview = track.previewUrl;
+    if (rawPreview == null) {
+      preview = null;
+    } else if (rawPreview.startsWith('http')) {
+      if (rawPreview.contains('cdnt-preview.dzcdn.net') ||
+          rawPreview.contains('cdns-preview.dzcdn.net') ||
+          rawPreview.contains('dzcdn.net')) {
+        preview = '$base/deezer/stream/$parsedId';
+      } else {
+        preview = rawPreview;
+      }
+    } else {
+      preview = '$base${rawPreview.startsWith('/') ? '' : '/'}$rawPreview';
+    }
+    
     return {
       'id': parsedId,
       'title': track.title,
       'artist_name': track.artistName,
       'duration_ms': track.durationMs,
-      'preview_url': track.previewUrl,
+      'preview_url': preview,
       'cover_url': track.coverUrl,
     };
   }

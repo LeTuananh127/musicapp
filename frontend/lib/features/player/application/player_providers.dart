@@ -67,6 +67,7 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
   final Map<String, DateTime> _availabilityExpiry = {};
   static const Duration _availabilityTTL = Duration(minutes: 5);
   int? _loggedTrackId; // track id already logged for start
+  bool _isLoadingNewTrack = false; // Flag to skip seek validation during track changes
   Timer? _tick;
   Timer? _persistDebounce;
   static const _persistKey = 'player_state_v1';
@@ -174,6 +175,7 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
   Future<void> playQueue(List<Track> tracks, int startIndex,
       {Map<String, dynamic>? origin}) async {
     if (tracks.isEmpty || startIndex < 0 || startIndex >= tracks.length) return;
+    print('🎵 playQueue called: ${tracks.length} tracks, startIndex=$startIndex');
     await _audio.stop();
     // Pre-filter tracks that return 403/forbidden for their preview URLs.
     List<Track> filtered = tracks;
@@ -181,10 +183,13 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       // Only pre-check a small window around the requested start to avoid
       // issuing HEAD requests for every track in the queue when the user
       // taps a single item.
+      print('🔍 Filtering tracks...');
       filtered = await _filterAvailable(tracks,
           limitChecks: 6, startIndex: startIndex);
-    } catch (_) {
+      print('✅ Filter done: ${filtered.length} tracks available');
+    } catch (e) {
       // If the check fails, fall back to the original list
+      print('⚠️ Filter error: $e');
       filtered = tracks;
     }
     if (filtered.isEmpty) {
@@ -214,6 +219,7 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
     final desiredId = tracks[startIndex].id;
     final mappedIndex = filtered.indexWhere((t) => t.id == desiredId);
     if (mappedIndex >= 0) {
+      print('✅ Track found in filtered list: index $mappedIndex');
       startIndex = mappedIndex;
     } else {
       // Desired track was filtered out (likely forbidden). Do not jump to
@@ -221,6 +227,8 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       // player bar (playing=false) and keep the available queue as the
       // filtered list. The user can manually try to play or navigate.
       final desired = tracks[startIndex];
+      print('❌ Track "${desired.title}" was filtered out (403/unavailable)');
+      print('   Showing in player bar but not playing');
       state = PlayerStateModel(
         current: desired,
         playing: false,
@@ -262,7 +270,9 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
 
     if (start.previewUrl == null) {
       state = state.copyWith(playing: true);
+      _isLoadingNewTrack = false;
     } else {
+      _isLoadingNewTrack = true;
       try {
         // Debug: log URL being loaded for queue start
         // ignore: avoid_print
@@ -276,6 +286,8 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
         // ignore: avoid_print
         print('Audio load failed (playQueue start): ${start.previewUrl} -> $e');
         // keep playing=false
+      } finally {
+        _isLoadingNewTrack = false;
       }
     }
     _loggedTrackId = null;
@@ -334,8 +346,10 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
 
     if (nextTrack.previewUrl == null) {
       state = state.copyWith(playing: true);
+      _isLoadingNewTrack = false;
       return;
     }
+    _isLoadingNewTrack = true;
     try {
       // Debug: loading next track
       // ignore: avoid_print
@@ -348,6 +362,8 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
           'Audio load failed: ${e.toString()}';
       // ignore: avoid_print
       print('Audio load failed (next): ${nextTrack.previewUrl} -> $e');
+    } finally {
+      _isLoadingNewTrack = false;
     }
   }
 
@@ -373,8 +389,10 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
 
     if (prevTrack.previewUrl == null) {
       state = state.copyWith(playing: true);
+      _isLoadingNewTrack = false;
       return;
     }
+    _isLoadingNewTrack = true;
     try {
       // Debug: loading prev track
       // ignore: avoid_print
@@ -387,6 +405,8 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
           'Audio load failed: ${e.toString()}';
       // ignore: avoid_print
       print('Audio load failed (previous): ${prevTrack.previewUrl} -> $e');
+    } finally {
+      _isLoadingNewTrack = false;
     }
   }
 
@@ -413,8 +433,10 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
 
     if (track.previewUrl == null) {
       if (autoplay) state = state.copyWith(playing: true);
+      _isLoadingNewTrack = false;
       return;
     }
+    _isLoadingNewTrack = true;
     try {
       // Debug: loading jumpTo track
       // ignore: avoid_print
@@ -427,6 +449,8 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
           'Audio load failed: ${e.toString()}';
       // ignore: avoid_print
       print('Audio load failed (jumpTo): ${track.previewUrl} -> $e');
+    } finally {
+      _isLoadingNewTrack = false;
     }
   }
 
@@ -757,6 +781,15 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
 
     try {
       await _audio.seek(clipped);
+      
+      // Skip position validation if we're currently loading a new track
+      // (position might still reflect the previous track)
+      if (_isLoadingNewTrack) {
+        state = state.copyWith(position: clipped);
+        _schedulePersist();
+        return;
+      }
+      
       // give the audio engine a short moment to update position
       await Future.delayed(const Duration(milliseconds: 250));
       final actual = _audio.position;
@@ -932,8 +965,9 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
         _schedulePersist();
         return;
       }
+      // Only persist state periodically, don't log interaction every 10s
+      // Interactions are logged at milestones (25%, 50%, 75%, 100%)
       if (pos.inSeconds % 10 == 0) {
-        _logInteraction();
         _schedulePersist();
       }
       if (progress >= 0.25 && mark(25)) _logInteraction(milestone: 25);

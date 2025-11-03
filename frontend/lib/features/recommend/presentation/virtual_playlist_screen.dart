@@ -14,8 +14,9 @@ class VirtualPlaylistScreen extends ConsumerStatefulWidget {
   final List<int>? artistIds;
   final List<Map<String, dynamic>>? tracks;
   final String title;
+  final bool preserveOrder; // Don't shuffle if true
   const VirtualPlaylistScreen(
-      {super.key, this.artistIds, this.tracks, required this.title});
+      {super.key, this.artistIds, this.tracks, required this.title, this.preserveOrder = false});
 
   @override
   ConsumerState<VirtualPlaylistScreen> createState() =>
@@ -55,14 +56,16 @@ class _VirtualPlaylistScreenState extends ConsumerState<VirtualPlaylistScreen> {
     // Try to load saved shuffle state from current session
     final savedState = ShuffleStateManager.loadShuffleState(_screenKey);
 
-    if (savedState != null) {
-      // Restore saved shuffle state
+    if (savedState != null && !widget.preserveOrder) {
+      // Restore saved shuffle state (only if shuffling is allowed)
       _shuffled = savedState['shuffled'] as List<Map<String, dynamic>>;
       _pageIndex = savedState['pageIndex'] as int;
     } else {
-      // Create new shuffle
+      // Create new shuffle or preserve order
       _shuffled = _tracks.map((e) => Map<String, dynamic>.from(e)).toList();
-      _shuffled.shuffle(Random());
+      if (!widget.preserveOrder) {
+        _shuffled.shuffle(Random());
+      }
       _pageIndex = 0;
     }
 
@@ -271,11 +274,12 @@ class _VirtualPlaylistScreenState extends ConsumerState<VirtualPlaylistScreen> {
                               child: Row(
                                 children: [
                                   const Spacer(),
-                                  IconButton(
-                                    icon: const Icon(Icons.shuffle),
-                                    onPressed:
-                                        _shuffled.isEmpty ? null : _reshuffle,
-                                  ),
+                                  if (!widget.preserveOrder)
+                                    IconButton(
+                                      icon: const Icon(Icons.shuffle),
+                                      onPressed:
+                                          _shuffled.isEmpty ? null : _reshuffle,
+                                    ),
                                 ],
                               ),
                             ),

@@ -28,8 +28,20 @@ class PlaylistTrackEntry {
   final int position;
   final String? title;
   final int? artistId;
+  final String? artistName;
   final int? durationMs;
-  const PlaylistTrackEntry({required this.trackId, required this.position, this.title, this.artistId, this.durationMs});
+  final String? coverUrl;
+  final String? previewUrl;
+  const PlaylistTrackEntry({
+    required this.trackId,
+    required this.position,
+    this.title,
+    this.artistId,
+    this.artistName,
+    this.durationMs,
+    this.coverUrl,
+    this.previewUrl,
+  });
 }
 
 class PlaylistRepository implements IPlaylistRepository {
@@ -109,7 +121,10 @@ class PlaylistRepository implements IPlaylistRepository {
                 position: e['position'],
                 title: e['title'],
                 artistId: e['artist_id'],
+                artistName: e['artist_name'],
                 durationMs: e['duration_ms'],
+                coverUrl: e['cover_url'],
+                previewUrl: e['preview_url'],
               ))
           .toList();
     }

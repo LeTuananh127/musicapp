@@ -22,6 +22,19 @@ class _LikedSongsScreenState extends ConsumerState<LikedSongsScreen> {
   bool _initialized = false;
 
   @override
+  void initState() {
+    super.initState();
+    _reloadData();
+  }
+
+  Future<void> _reloadData() async {
+    // Reload liked tracks from server
+    await ref.read(likedTracksProvider.notifier).reload();
+    // No need to invalidate - likedTracksListProvider watches likedTracksProvider
+    // and will auto-rebuild when state changes
+  }
+
+  @override
   void dispose() {
     // Save shuffle state when leaving screen
     _saveShuffleState();
@@ -88,52 +101,9 @@ class _LikedSongsScreenState extends ConsumerState<LikedSongsScreen> {
         title: const Text('Liked Songs'),
         actions: [
           IconButton(
-            tooltip: 'Play All',
-            icon: const Icon(Icons.play_arrow),
-            onPressed: () {
-              final data = ref.read(likedTracksListProvider);
-              data.whenOrNull(data: (tracks) {
-                if (tracks.isEmpty) return;
-                final queue = _shuffled.isNotEmpty ? _shuffled : tracks;
-                final trackList =
-                    (queue is List<Map<String, dynamic>> ? queue : tracks)
-                        .map((e) {
-                  if (e is Map) {
-                    return e;
-                  }
-                  return {
-                    'id': (e as dynamic).id,
-                    'title': (e as dynamic).title,
-                    'artist_name': (e as dynamic).artistName,
-                    'duration_ms': (e as dynamic).durationMs,
-                  };
-                }).toList();
-                final convertedQueue = trackList
-                    .map((e) => Track(
-                          id: e['id'].toString(),
-                          title: e['title'] ?? '',
-                          artistName: e['artist_name'] ?? '',
-                          durationMs: e['duration_ms'] ?? 0,
-                        ))
-                    .toList();
-                ref
-                    .read(playerControllerProvider.notifier)
-                    .playQueue(convertedQueue, 0, origin: {'type': 'liked'});
-              });
-            },
-          ),
-          IconButton(
             tooltip: 'Refresh',
             icon: const Icon(Icons.refresh),
-            onPressed: () {
-              ref.invalidate(likedTracksListProvider);
-              setState(() {
-                _initialized = false;
-                _shuffled = [];
-                _chunks = [];
-                _pageIndex = 0;
-              });
-            },
+            onPressed: _reloadData,
           ),
         ],
       ),
@@ -144,7 +114,17 @@ class _LikedSongsScreenState extends ConsumerState<LikedSongsScreen> {
                 child: Text('Chưa có bài hát nào bạn đã thích.'));
           }
 
-          if (!_initialized) {
+          // ALWAYS reset shuffle state when tracks change (not just count)
+          // This ensures unliked tracks are removed immediately
+          final trackIds = tracks.map((t) => t.id).toSet();
+          final currentIds = _shuffled.map((t) => t['id'].toString()).toSet();
+          
+          if (!_initialized || !trackIds.containsAll(currentIds) || trackIds.length != currentIds.length) {
+            print('🔄 Resetting shuffle state: initialized=$_initialized, trackIds=${trackIds.length}, currentIds=${currentIds.length}');
+            _initialized = false;
+            _shuffled = [];
+            _chunks = [];
+            _pageIndex = 0;
             _prepareChunks(tracks);
           }
 
@@ -153,43 +133,30 @@ class _LikedSongsScreenState extends ConsumerState<LikedSongsScreen> {
               ? <Map<String, dynamic>>[]
               : _chunks[_pageIndex.clamp(0, pageCount - 1)];
 
-          return Column(
-            children: [
-              // Paging & shuffle controls
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                child: Row(
-                  children: [
-                    IconButton(
-                      tooltip: 'Prev page',
-                      icon: const Icon(Icons.chevron_left),
-                      onPressed: _pageIndex > 0
-                          ? () => setState(() => _pageIndex -= 1)
-                          : null,
-                    ),
-                    Text('Page ${_pageIndex + 1} / $pageCount'),
-                    IconButton(
-                      tooltip: 'Next page',
-                      icon: const Icon(Icons.chevron_right),
-                      onPressed: _pageIndex < pageCount - 1
-                          ? () => setState(() => _pageIndex += 1)
-                          : null,
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      tooltip: 'Shuffle',
-                      icon: const Icon(Icons.shuffle),
-                      onPressed: _shuffled.isEmpty ? null : _reshuffle,
-                    ),
-                  ],
+          return RefreshIndicator(
+            onRefresh: _reloadData,
+            child: Column(
+              children: [
+                // Shuffle control only
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  child: Row(
+                    children: [
+                      const Spacer(),
+                      IconButton(
+                        tooltip: 'Shuffle',
+                        icon: const Icon(Icons.shuffle),
+                        onPressed: _shuffled.isEmpty ? null : _reshuffle,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const Divider(height: 1),
-              Expanded(
-                child: currentChunk.isEmpty
-                    ? const Center(
-                        child: Text('Chưa có bài hát nào bạn đã thích.'))
-                    : ListView.separated(
+                const Divider(height: 1),
+                Expanded(
+                  child: currentChunk.isEmpty
+                      ? const Center(
+                          child: Text('Chưa có bài hát nào bạn đã thích.'))
+                      : ListView.separated(
                         itemCount: currentChunk.length,
                         separatorBuilder: (_, __) => const Divider(height: 1),
                         itemBuilder: (c, idx) {
@@ -202,44 +169,6 @@ class _LikedSongsScreenState extends ConsumerState<LikedSongsScreen> {
                           final player = ref.watch(playerControllerProvider);
                           final isCurrent =
                               player.current?.id == t['id'].toString();
-                          final playing = isCurrent && player.playing;
-
-                          String fmt(int ms) {
-                            final d = Duration(milliseconds: ms);
-                            final m = d.inMinutes
-                                .remainder(60)
-                                .toString()
-                                .padLeft(2, '0');
-                            final s = d.inSeconds
-                                .remainder(60)
-                                .toString()
-                                .padLeft(2, '0');
-                            return '$m:$s';
-                          }
-
-                          final durMs = (t['duration_ms'] as int?) ?? 0;
-                          final durText = fmt(durMs);
-                          final playerState =
-                              ref.watch(playerControllerProvider);
-                          Duration currentPos =
-                              isCurrent ? playerState.position : Duration.zero;
-                          String extra = '';
-                          if (isCurrent) {
-                            String fmtD(Duration d) {
-                              final m = d.inMinutes
-                                  .remainder(60)
-                                  .toString()
-                                  .padLeft(2, '0');
-                              final s = d.inSeconds
-                                  .remainder(60)
-                                  .toString()
-                                  .padLeft(2, '0');
-                              return '$m:$s';
-                            }
-
-                            final total = Duration(milliseconds: durMs);
-                            extra = ' • ${fmtD(currentPos)} / ${fmtD(total)}';
-                          }
 
                           // Build album cover
                           final rawCover = (t['cover_url'] as String?) ?? '';
@@ -281,7 +210,7 @@ class _LikedSongsScreenState extends ConsumerState<LikedSongsScreen> {
 
                           return ListTile(
                             tileColor: isCurrent
-                                ? Colors.blue.withValues(alpha: 0.06)
+                                ? Colors.green.withOpacity(0.06)
                                 : null,
                             leading: SizedBox(
                                 width: 48, height: 48, child: leadingWidget),
@@ -291,59 +220,80 @@ class _LikedSongsScreenState extends ConsumerState<LikedSongsScreen> {
                                   ? const TextStyle(fontWeight: FontWeight.bold)
                                   : null,
                             ),
-                            subtitle: Text(
-                                '${t['artist_name'] ?? ''} • $durText$extra'),
-                            trailing: Wrap(
-                              spacing: 4,
-                              children: [
-                                IconButton(
-                                  icon: Icon(
-                                      liked
-                                          ? Icons.favorite
-                                          : Icons.favorite_border,
-                                      color: liked ? Colors.red : null),
-                                  onPressed: () => ref
-                                      .read(likedTracksProvider.notifier)
-                                      .toggle(trackId),
-                                ),
-                                IconButton(
-                                  icon: Icon(playing
-                                      ? Icons.pause_circle_filled
-                                      : Icons.play_circle_fill),
-                                  onPressed: () {
-                                    final ctrl = ref.read(
-                                        playerControllerProvider.notifier);
-                                    if (!isCurrent) {
-                                      final queue = _shuffled
-                                          .map((e) => Track(
-                                                id: e['id'].toString(),
-                                                title: e['title'] ?? '',
-                                                artistName:
-                                                    e['artist_name'] ?? '',
-                                                durationMs:
-                                                    e['duration_ms'] ?? 0,
-                                                previewUrl:
-                                                    e['preview_url'] as String?,
-                                                coverUrl:
-                                                    e['cover_url'] as String?,
-                                              ))
-                                          .toList();
-                                      final startIndex =
-                                          globalIndex >= 0 ? globalIndex : 0;
-                                      ctrl.playQueue(queue, startIndex,
-                                          origin: {'type': 'liked'});
-                                    } else {
-                                      ctrl.togglePlay();
-                                    }
-                                  },
-                                ),
-                              ],
+                            subtitle: Text(t['artist_name'] ?? ''),
+                            onTap: () {
+                              final ctrl =
+                                  ref.read(playerControllerProvider.notifier);
+                              final queue = _shuffled
+                                  .map((e) => Track(
+                                        id: e['id'].toString(),
+                                        title: e['title'] ?? '',
+                                        artistName: e['artist_name'] ?? '',
+                                        durationMs: e['duration_ms'] ?? 0,
+                                        previewUrl: e['preview_url'] as String?,
+                                        coverUrl: e['cover_url'] as String?,
+                                      ))
+                                  .toList();
+                              final startIndex =
+                                  globalIndex >= 0 ? globalIndex : 0;
+                              // Debug: log track info
+                              if (queue.isNotEmpty && startIndex < queue.length) {
+                                print('💙 Liked tap: ${queue[startIndex].title}');
+                                print('   preview_url: ${queue[startIndex].previewUrl}');
+                                print('   cover_url: ${queue[startIndex].coverUrl}');
+                              }
+                              if (!isCurrent) {
+                                ctrl.playQueue(queue, startIndex,
+                                    origin: {'type': 'liked'});
+                              } else {
+                                ctrl.togglePlay();
+                              }
+                            },
+                            trailing: IconButton(
+                              icon: Icon(
+                                  liked
+                                      ? Icons.favorite
+                                      : Icons.favorite_border,
+                                  color: liked ? Colors.red : null),
+                              onPressed: () async {
+                                if (liked) {
+                                  // Show confirmation dialog before unliking
+                                  final confirmed = await showDialog<bool>(
+                                    context: context,
+                                    builder: (ctx) => AlertDialog(
+                                      title: const Text('Bỏ thích bài hát?'),
+                                      content: Text('Bạn có chắc muốn bỏ thích "${t['title']}"?'),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(ctx, false),
+                                          child: const Text('Hủy'),
+                                        ),
+                                        FilledButton(
+                                          style: FilledButton.styleFrom(
+                                            backgroundColor: Colors.red,
+                                          ),
+                                          onPressed: () => Navigator.pop(ctx, true),
+                                          child: const Text('Bỏ thích'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                  
+                                  if (confirmed == true) {
+                                    await ref.read(likedTracksProvider.notifier).toggle(trackId);
+                                  }
+                                } else {
+                                  // Like without confirmation
+                                  await ref.read(likedTracksProvider.notifier).toggle(trackId);
+                                }
+                              },
                             ),
                           );
                         },
                       ),
-              ),
-            ],
+                ),
+              ],
+            ),
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),

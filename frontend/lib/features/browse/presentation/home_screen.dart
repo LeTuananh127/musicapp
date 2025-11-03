@@ -73,6 +73,9 @@ class HomeScreen extends ConsumerWidget {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Lỗi: $e')),
         data: (tracks) {
+          // Ensure liked tracks are loaded from server
+          ref.read(likedTracksProvider.notifier).ensureLoaded();
+          
           if (tracks.isEmpty) {
             return const Center(child: Text('Không có track.'));
           }
