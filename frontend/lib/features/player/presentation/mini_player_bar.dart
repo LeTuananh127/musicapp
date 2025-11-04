@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../application/player_providers.dart';
-import 'track_error_log_screen.dart';
+// import 'track_error_log_screen.dart'; // removed menu, no longer used
 // queue_screen not used in compact mode
 
 class MiniPlayerBar extends ConsumerWidget {
@@ -106,30 +106,17 @@ class _MiniPlayerControls extends StatelessWidget {
                 _icon(context,
             icon: Icons.skip_next,
             onPressed: state.hasNext ? ctrl.next : null),
-        PopupMenuButton<String>(
-          icon: const Icon(Icons.more_vert, size: 22),
+        // Replace overflow menu with a Close (X) button to hide the mini player
+        IconButton(
+          visualDensity: VisualDensity.compact,
           padding: EdgeInsets.zero,
-          itemBuilder: (ctx) => [
-            const PopupMenuItem(
-              value: 'error_log',
-              child: Row(
-                children: [
-                  Icon(Icons.error_outline, size: 20, color: Colors.red),
-                  SizedBox(width: 8),
-                  Text('Error Logs (403)'),
-                ],
-              ),
-            ),
-          ],
-          onSelected: (val) {
-            if (val == 'error_log') {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const TrackErrorLogScreen(),
-                ),
-              );
-            }
+          constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+          tooltip: 'Close',
+          icon: const Icon(Icons.close, size: 22),
+          onPressed: () async {
+            try {
+              await ctrl.stop();
+            } catch (_) {}
           },
         ),
       ],

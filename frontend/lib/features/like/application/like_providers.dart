@@ -30,6 +30,10 @@ class LikedTracksController extends StateNotifier<Set<int>> {
     print('✅ Reloaded ${liked.length} liked tracks: $liked');
     state = liked;
     _loaded = true;
+    // Only increment counter - no need to invalidate (causes CircularDependencyError)
+    Future.microtask(() {
+      ref.read(likedTracksRefreshProvider.notifier).state++;
+    });
   }
 
   Future<void> toggle(int trackId) async {
@@ -43,12 +47,16 @@ class LikedTracksController extends StateNotifier<Set<int>> {
       try {
         await repo.unlike(trackId);
         print('  ✅ Unlike API success');
-        // Update state after API success
+        // Update state after API success - this will trigger likedTracksListProvider rebuild
         current.remove(trackId);
         state = current;
         print('  → Updated state after unlike: $state');
-        // Invalidate list provider to trigger refetch
-        ref.invalidate(likedTracksListProvider);
+        // Only increment counter - no need to invalidate (causes CircularDependencyError)
+        Future.microtask(() {
+          final oldCount = ref.read(likedTracksRefreshProvider);
+          ref.read(likedTracksRefreshProvider.notifier).state++;
+          print('  🔄 Incremented counter: $oldCount → ${ref.read(likedTracksRefreshProvider)}');
+        });
       } catch (e) {
         print('  ❌ Unlike API failed: $e');
         // Don't change state on error
@@ -58,12 +66,16 @@ class LikedTracksController extends StateNotifier<Set<int>> {
       try {
         await repo.like(trackId);
         print('  ✅ Like API success');
-        // Update state after API success
+        // Update state after API success - this will trigger likedTracksListProvider rebuild
         current.add(trackId);
         state = current;
         print('  → Updated state after like: $state');
-        // Invalidate list provider to trigger refetch
-        ref.invalidate(likedTracksListProvider);
+        // Only increment counter - no need to invalidate (causes CircularDependencyError)
+        Future.microtask(() {
+          final oldCount = ref.read(likedTracksRefreshProvider);
+          ref.read(likedTracksRefreshProvider.notifier).state++;
+          print('  🔄 Incremented counter: $oldCount → ${ref.read(likedTracksRefreshProvider)}');
+        });
       } catch (e) {
         print('  ❌ Like API failed: $e');
         // Don't change state on error
@@ -79,14 +91,37 @@ class LikedTracksController extends StateNotifier<Set<int>> {
 }
 
 // Derived provider: fetch full track objects for liked IDs (simple approach: fetchAll then filter)
+// Using refresh counter to force rebuild when data changes
+// Make this public so UI can watch it to trigger rebuild
+final likedTracksRefreshProvider = StateProvider<int>((ref) => 0);
+
 final likedTracksListProvider = FutureProvider.autoDispose<List<Track>>((ref) async {
+  // Keep alive to prevent auto-dispose
+  ref.keepAlive();
+  
+  // Watch refresh counter to bust cache - this FORCES rebuild
+  final refreshCount = ref.watch(likedTracksRefreshProvider);
   final likedIds = ref.watch(likedTracksProvider);
-  print('🔄 likedTracksListProvider rebuilding with ${likedIds.length} liked IDs');
+  print('🔄 likedTracksListProvider rebuilding (refresh #$refreshCount) with ${likedIds.length} liked IDs: $likedIds');
+  
   if (likedIds.isEmpty) return <Track>[];
   final repo = ref.watch(trackRepositoryProvider);
-  // naive: fetch all then filter; later could add endpoint /tracks?ids=
-  final all = await repo.fetchAll();
-  final result = all.where((t) => likedIds.contains(int.tryParse(t.id) ?? -1)).toList();
-  print('✅ likedTracksListProvider returning ${result.length} tracks');
-  return result;
+
+  // Fetch each track by ID instead of fetchAll (which has limit)
+  // Parallelize requests for better latency and then sort by id desc for stable order
+  final ids = likedIds.toList()..sort((a, b) => b.compareTo(a));
+  final futures = ids.map((id) async {
+    try {
+      return await repo.getById(id);
+    } catch (e) {
+      print('❌ Error fetching track $id: $e');
+      return null;
+    }
+  }).toList();
+
+  final resolved = await Future.wait(futures);
+  final tracks = resolved.whereType<Track>().toList();
+
+  print('✅ likedTracksListProvider returning ${tracks.length} tracks: ${tracks.map((t) => t.id).toList()}');
+  return tracks;
 });

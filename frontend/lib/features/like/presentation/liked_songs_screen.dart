@@ -20,18 +20,50 @@ class _LikedSongsScreenState extends ConsumerState<LikedSongsScreen> {
   List<List<Map<String, dynamic>>> _chunks = [];
   int _pageIndex = 0;
   bool _initialized = false;
+  Set<String> _lastTrackIds = {}; // Track IDs from last build
 
   @override
   void initState() {
     super.initState();
-    _reloadData();
+    print('🎯 LikedSongsScreen initState');
+    
+    // Listen to refresh counter and force setState when it changes
+    ref.listenManual(likedTracksRefreshProvider, (previous, next) {
+      print('🔔 Refresh counter changed: $previous → $next - forcing setState');
+      if (mounted) {
+        setState(() {
+          // Force rebuild by resetting state
+          _initialized = false;
+          _shuffled = [];
+          _chunks = [];
+          _pageIndex = 0;
+          _lastTrackIds = {};
+        });
+      }
+    });
+    
+    // Load on first init
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _reloadData();
+    });
   }
 
   Future<void> _reloadData() async {
+    print('🔄 _reloadData called');
     // Reload liked tracks from server
     await ref.read(likedTracksProvider.notifier).reload();
-    // No need to invalidate - likedTracksListProvider watches likedTracksProvider
-    // and will auto-rebuild when state changes
+    // Force refresh the list provider - invalidate to clear cache
+    ref.invalidate(likedTracksListProvider);
+    // Reset shuffle state
+    if (mounted) {
+      setState(() {
+        _initialized = false;
+        _shuffled = [];
+        _chunks = [];
+        _pageIndex = 0;
+        _lastTrackIds = {};
+      });
+    }
   }
 
   @override
@@ -53,12 +85,28 @@ class _LikedSongsScreenState extends ConsumerState<LikedSongsScreen> {
     // Try to load saved shuffle state from current session
     final savedState = ShuffleStateManager.loadShuffleState(_screenKey);
 
+    // Build current ID set from provided tracks
+    final currentIds = tracks.map((e) => e.id.toString()).toSet();
+
+    bool restored = false;
     if (savedState != null) {
-      // Restore saved shuffle state
-      _shuffled = savedState['shuffled'] as List<Map<String, dynamic>>;
-      _pageIndex = savedState['pageIndex'] as int;
-    } else {
-      // Create new shuffle
+      final savedShuffled = (savedState['shuffled'] as List<dynamic>?)
+              ?.cast<Map<String, dynamic>>() ??
+          <Map<String, dynamic>>[];
+      final savedIds = savedShuffled.map((e) => e['id'].toString()).toSet();
+
+      // Only restore saved shuffle if it matches the current track ID set
+      if (savedIds.length == currentIds.length &&
+          savedIds.containsAll(currentIds) &&
+          currentIds.containsAll(savedIds)) {
+        _shuffled = savedShuffled;
+        _pageIndex = (savedState['pageIndex'] as int?) ?? 0;
+        restored = true;
+      }
+    }
+
+    if (!restored) {
+      // Create new shuffle from current tracks when no valid saved state
       final copy = tracks
           .map((e) => {
                 'id': e.id,
@@ -95,7 +143,12 @@ class _LikedSongsScreenState extends ConsumerState<LikedSongsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // CRITICAL: Watch refresh counter to force UI rebuild when data changes
+    final _ = ref.watch(likedTracksRefreshProvider);
     final likedList = ref.watch(likedTracksListProvider);
+    final likedIds = ref.watch(likedTracksProvider);
+    print('🎨 LikedSongsScreen build - likedIds count: ${likedIds.length}, list state: ${likedList is AsyncData ? 'data' : likedList is AsyncLoading ? 'loading' : 'error'}');
+    
     return Scaffold(
       appBar: AppBar(
         title: const Text('Liked Songs'),
@@ -114,17 +167,23 @@ class _LikedSongsScreenState extends ConsumerState<LikedSongsScreen> {
                 child: Text('Chưa có bài hát nào bạn đã thích.'));
           }
 
-          // ALWAYS reset shuffle state when tracks change (not just count)
-          // This ensures unliked tracks are removed immediately
+          // ALWAYS reset shuffle state when track IDs change
+          // This ensures liked/unliked tracks update immediately
           final trackIds = tracks.map((t) => t.id).toSet();
-          final currentIds = _shuffled.map((t) => t['id'].toString()).toSet();
           
-          if (!_initialized || !trackIds.containsAll(currentIds) || trackIds.length != currentIds.length) {
-            print('🔄 Resetting shuffle state: initialized=$_initialized, trackIds=${trackIds.length}, currentIds=${currentIds.length}');
+          // Compare with last known track IDs
+          final hasChanged = !_initialized || 
+                             trackIds.length != _lastTrackIds.length ||
+                             !trackIds.containsAll(_lastTrackIds) ||
+                             !_lastTrackIds.containsAll(trackIds);
+          
+          if (hasChanged) {
+            print('🔄 Track IDs changed! Old: $_lastTrackIds, New: $trackIds');
             _initialized = false;
             _shuffled = [];
             _chunks = [];
             _pageIndex = 0;
+            _lastTrackIds = trackIds;
             _prepareChunks(tracks);
           }
 
