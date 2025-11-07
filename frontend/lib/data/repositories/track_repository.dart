@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
+import 'dart:io' show Platform;
 import '../models/track.dart';
 import '../../shared/providers/dio_provider.dart';
 
@@ -111,12 +112,101 @@ class TrackRepository implements ITrackRepository {
     return Track(id: id.toString(), title: 'Track $id', artistName: 'N/A', durationMs: 0, previewUrl: null);
   }
 
+  @override
   Future<void> view(int id) async {
     try {
       await _dio.post('$baseUrl/tracks/$id/view');
     } catch (_) {
       // ignore errors – viewing is best-effort
     }
+  }
+
+  /// Upload a track file (audio) with optional cover image.
+  /// Returns created Track or null on failure.
+  Future<Track?> uploadTrack({
+    required String title,
+    int? artistId,
+    required String audioPath,
+    String? coverPath,
+    int durationMs = 0,
+    void Function(int, int)? onSendProgress,
+  }) async {
+    try {
+      final map = <String, dynamic>{
+        'title': title,
+        'duration_ms': durationMs,
+        'audio': await MultipartFile.fromFile(audioPath, filename: audioPath.split(Platform.pathSeparator).last),
+      };
+      if (coverPath != null) {
+        map['cover'] = await MultipartFile.fromFile(coverPath, filename: coverPath.split(Platform.pathSeparator).last);
+      }
+      // only include artist_id when provided (leave out to let backend create an artist owned by uploader)
+      if (artistId != null && artistId > 0) {
+        map['artist_id'] = artistId;
+      }
+      final form = FormData.fromMap(map);
+      final resp = await _dio.post('$baseUrl/tracks/upload', data: form, onSendProgress: onSendProgress, options: Options(headers: {}));
+      if (resp.statusCode == 200 && resp.data != null) {
+        final e = resp.data as Map<String, dynamic>;
+        final base = baseUrl;
+        final rawPreview = e['preview_url'];
+        String? preview;
+        if (rawPreview == null) preview = null; else preview = rawPreview.toString().startsWith('http') ? rawPreview : base + rawPreview.toString();
+        final rawCover = e['cover_url'];
+        final cover = rawCover == null ? null : (rawCover.toString().startsWith('http') ? rawCover : base + rawCover.toString());
+        return Track(
+          id: (e['id']).toString(),
+          title: e['title'] ?? title,
+          artistName: e['artist_name'] ?? 'Unknown',
+          durationMs: (e['duration_ms'] ?? durationMs) as int,
+          previewUrl: preview,
+          coverUrl: cover,
+          views: (e['views'] as num?)?.toInt(),
+        );
+      }
+    } catch (e) {
+      // ignore
+    }
+    return null;
+  }
+
+  /// Create a track using external audio and cover URLs (no file upload)
+  Future<Track?> createTrackWithUrls({
+    required String title,
+    int? artistId,
+    int durationMs = 0,
+    String? audioUrl,
+    String? coverUrl,
+  }) async {
+    try {
+      final body = <String, dynamic>{
+        'title': title,
+        'duration_ms': durationMs,
+        if (audioUrl != null) 'audio_url': audioUrl,
+        if (coverUrl != null) 'cover_url': coverUrl,
+      };
+      if (artistId != null && artistId > 0) body['artist_id'] = artistId;
+      final resp = await _dio.post('$baseUrl/tracks/create', data: body);
+      if (resp.statusCode == 200 && resp.data != null) {
+        final e = resp.data as Map<String, dynamic>;
+        final base = baseUrl;
+        final rawPreview = e['preview_url'];
+        String? preview;
+        if (rawPreview == null) preview = null; else preview = rawPreview.toString().startsWith('http') ? rawPreview : base + rawPreview.toString();
+        final rawCover = e['cover_url'];
+        final cover = rawCover == null ? null : (rawCover.toString().startsWith('http') ? rawCover : base + rawCover.toString());
+        return Track(
+          id: (e['id']).toString(),
+          title: e['title'] ?? title,
+          artistName: e['artist_name'] ?? 'Unknown',
+          durationMs: (e['duration_ms'] ?? durationMs) as int,
+          previewUrl: preview,
+          coverUrl: cover,
+          views: (e['views'] as num?)?.toInt(),
+        );
+      }
+    } catch (_) {}
+    return null;
   }
 }
 

@@ -6,7 +6,6 @@ import '../../shared/providers/dio_provider.dart';
 
 abstract class IInteractionRepository {
   Future<void> logPlay({required int trackId, required int seconds, bool completed = false, int? milestone});
-  Future<void> logExternalPlay({required String externalTrackId, required int seconds, bool completed = false, int? milestone});
   Future<void> flushQueue();
   Future<void> clearQueue();
 }
@@ -44,6 +43,7 @@ class InteractionRepository implements IInteractionRepository {
   }
 
   /// Public clear for client-initiated wipes (e.g., logout)
+  @override
   Future<void> clearQueue() async {
     await _clearQueue();
   }
@@ -74,27 +74,7 @@ class InteractionRepository implements IInteractionRepository {
   }
 
   @override
-  Future<void> logExternalPlay({required String externalTrackId, required int seconds, bool completed = false, int? milestone}) async {
-    final body = {
-      'external_track_id': externalTrackId,
-      'seconds_listened': seconds,
-      'is_completed': completed,
-      'device': 'app',
-      'context_type': 'manual',
-    };
-    if (milestone != null) body['milestone'] = milestone;
-    try {
-      final res = await _dio.post('$baseUrl/interactions/external', data: body);
-      if (res.statusCode == null || res.statusCode! < 200 || res.statusCode! >= 300) {
-        await _enqueue({'_external': true, '_body': body});
-        return;
-      }
-    } catch (_) {
-      try {
-        await _enqueue({'_external': true, '_body': body});
-      } catch (_) {}
-    }
-  }
+  // External-play logging removed: app should call logPlay with internal `trackId`.
 
   @override
   Future<void> flushQueue() async {

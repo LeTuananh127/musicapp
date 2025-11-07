@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, Fil
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from ..core.db import get_db
-from ..models.music import Track, TrackLike
+from ..models.music import Track, TrackLike, Artist, User
 import math
 from io import BytesIO
 import struct
@@ -16,6 +16,16 @@ from ..schemas.music import TrackOut
 
 router = APIRouter(prefix="/tracks", tags=["tracks"])
 auth_scheme = HTTPBearer()
+
+
+def _get_current_user(cred: HTTPAuthorizationCredentials = Depends(auth_scheme), db: Session = Depends(get_db)) -> User:
+    sub = decode_token(cred.credentials)
+    if not sub:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = db.query(User).filter(User.id == int(sub)).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
 
 @router.get("/", response_model=list[TrackOut])
 async def list_tracks(
@@ -55,14 +65,27 @@ async def list_tracks(
 @router.post('/upload', response_model=TrackOut)
 async def upload_track(
     title: str = Form(...),
-    artist_id: int = Form(...),
+    artist_id: int | None = Form(None),
     duration_ms: int = Form(...),
     audio: UploadFile = File(...),
     cover: UploadFile | None = File(None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(_get_current_user),
 ):
     # Save audio file as {new_id}.wav (or keep extension)
-    track = Track(title=title, artist_id=artist_id, album_id=None, duration_ms=duration_ms, preview_url=None, cover_url=None, is_explicit=False)
+    # Ensure artist exists; if artist_id not provided or doesn't exist, create artist for current_user
+    artist = None
+    if artist_id is not None:
+        artist = db.query(Artist).filter(Artist.id == artist_id).first()
+    if not artist:
+        # create a new artist using current user's display_name if available
+        artist_name = current_user.display_name or current_user.email or f'Artist {current_user.id}'
+        artist = Artist(name=artist_name, cover_url=None, created_by=current_user.id)
+        db.add(artist)
+        db.commit()
+        db.refresh(artist)
+
+    track = Track(title=title, artist_id=artist.id, album_id=None, duration_ms=duration_ms, preview_url=None, cover_url=None, is_explicit=False)
     db.add(track)
     db.commit()
     db.refresh(track)
@@ -105,6 +128,45 @@ async def bulk_create_tracks(
     for tr in created:
         db.refresh(tr)
     return created
+
+
+@router.post('/create', response_model=TrackOut)
+async def create_track_with_urls(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_get_current_user),
+):
+    """Create a track record using external audio/cover URLs (no file upload).
+
+    Expects JSON body: {"title": str, "artist_id": int, "duration_ms": int, "audio_url": str (optional), "cover_url": str (optional)}
+    """
+    title = payload.get('title')
+    artist_id = payload.get('artist_id')
+    duration_ms = payload.get('duration_ms', 0)
+    audio_url = payload.get('audio_url')
+    cover_url = payload.get('cover_url')
+    if not title:
+        raise HTTPException(status_code=400, detail='Missing title')
+    # Ensure artist exists; if artist_id not provided or invalid, create new artist for current user
+    artist = None
+    if artist_id:
+        artist = db.query(Artist).filter(Artist.id == artist_id).first()
+    if not artist:
+        artist_name = current_user.display_name or current_user.email or f'Artist {current_user.id}'
+        artist = Artist(name=artist_name, cover_url=None, created_by=current_user.id)
+        db.add(artist)
+        db.commit()
+        db.refresh(artist)
+
+    tr = Track(title=title, artist_id=artist.id, album_id=None, duration_ms=duration_ms, preview_url=None, cover_url=None, is_explicit=False)
+    if audio_url:
+        tr.preview_url = audio_url
+    if cover_url:
+        tr.cover_url = cover_url
+    db.add(tr)
+    db.commit()
+    db.refresh(tr)
+    return tr
 
 @router.api_route('/{track_id}/preview', methods=['GET', 'HEAD'])
 def track_preview(track_id: int, db: Session = Depends(get_db)):

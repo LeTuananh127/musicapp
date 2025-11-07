@@ -5,6 +5,7 @@ from ..core.db import get_db
 from ..models.music import Interaction, Track, User
 from ..core.security import decode_token
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from ..services.ml_recommendation_service import ml_recommendation_service
 
 router = APIRouter(prefix="/interactions", tags=["interactions"])
 auth_scheme = HTTPBearer()
@@ -16,12 +17,11 @@ class InteractionCreate(BaseModel):
     device: str | None = None
     context_type: str | None = None
     milestone: int | None = None  # 25,50,75,100 (percentage milestones)
-    external_track_id: str | None = None
+    # external_track_id removed: the app uses internal `track_id` only
 
 class InteractionOut(BaseModel):
     id: int
     track_id: int | None = None
-    external_track_id: str | None = None
     seconds_listened: int
     is_completed: bool
     milestone: int | None = None
@@ -45,7 +45,6 @@ def create_interaction(payload: InteractionCreate, user_id: int = Depends(get_cu
     interaction = Interaction(
         user_id=user_id,
         track_id=payload.track_id,
-        external_track_id=payload.external_track_id,
         seconds_listened=payload.seconds_listened,
         is_completed=payload.is_completed,
         device=payload.device,
@@ -55,34 +54,24 @@ def create_interaction(payload: InteractionCreate, user_id: int = Depends(get_cu
     db.add(interaction)
     db.commit()
     db.refresh(interaction)
+    # Trigger best-effort async retrain/update of ML model when new interaction is created
+    try:
+        ml_recommendation_service.maybe_retrain_async(db)
+    except Exception:
+        # don't fail the request if retrain scheduling fails
+        pass
     return interaction
 
 
 class ExternalInteractionCreate(BaseModel):
-    external_track_id: str
-    seconds_listened: int
-    is_completed: bool = False
-    device: str | None = None
-    context_type: str | None = None
-    milestone: int | None = None
+    # external interactions endpoint removed - app records using internal track_id
+    pass
 
 
 @router.post('/external', response_model=InteractionOut)
-def create_external_interaction(payload: ExternalInteractionCreate, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
-    # Create interaction referencing external provider id (e.g., Deezer preview id)
-    interaction = Interaction(
-        user_id=user_id,
-        external_track_id=payload.external_track_id,
-        seconds_listened=payload.seconds_listened,
-        is_completed=payload.is_completed,
-        device=payload.device,
-        context_type=payload.context_type,
-        milestone=payload.milestone,
-    )
-    db.add(interaction)
-    db.commit()
-    db.refresh(interaction)
-    return interaction
+def create_external_interaction(*_args, **_kwargs):
+    # Endpoint intentionally removed. Return 404-like behavior through raising.
+    raise HTTPException(status_code=404, detail="External interactions are no longer supported; use /interactions/ with track_id")
 
 @router.get('/recent', response_model=list[InteractionOut])
 def recent(user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db), limit: int = 20):

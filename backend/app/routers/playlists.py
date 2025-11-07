@@ -13,11 +13,13 @@ class PlaylistCreate(BaseModel):
     name: str
     description: str | None = None
     is_public: bool = True
+    cover_url: str | None = None
 
 class PlaylistOut(BaseModel):
     id: int
     name: str
     description: str | None
+    cover_url: str | None = None
     is_public: bool
     class Config:
         from_attributes = True
@@ -44,6 +46,13 @@ class ReorderPayload(BaseModel):
     ordered_track_ids: list[int]
 
 
+class PlaylistUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    is_public: bool | None = None
+    cover_url: str | None = None
+
+
 def get_current_user_id(cred: HTTPAuthorizationCredentials = Depends(auth_scheme)) -> int:
     sub = decode_token(cred.credentials)
     if not sub:
@@ -68,7 +77,7 @@ def get_optional_user_id(request: Request) -> int | None:
 
 @router.post('/', response_model=PlaylistOut)
 def create_playlist(payload: PlaylistCreate, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
-    playlist = Playlist(user_id=user_id, name=payload.name, description=payload.description, is_public=payload.is_public)
+    playlist = Playlist(user_id=user_id, name=payload.name, description=payload.description, is_public=payload.is_public, cover_url=payload.cover_url)
     db.add(playlist)
     db.commit()
     db.refresh(playlist)
@@ -158,6 +167,36 @@ def reorder_tracks(playlist_id: int, payload: ReorderPayload, user_id: int = Dep
         id_to_row[tid].position = idx
     db.commit()
     return {"reordered": True, "count": len(payload.ordered_track_ids)}
+
+
+@router.patch('/{playlist_id}', response_model=PlaylistOut)
+def update_playlist(playlist_id: int, payload: PlaylistUpdate, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    playlist = db.query(Playlist).filter(Playlist.id == playlist_id, Playlist.user_id == user_id).first()
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    if payload.name is not None:
+        playlist.name = payload.name
+    if payload.description is not None:
+        playlist.description = payload.description
+    if payload.is_public is not None:
+        playlist.is_public = payload.is_public
+    if payload.cover_url is not None:
+        playlist.cover_url = payload.cover_url
+    db.commit()
+    db.refresh(playlist)
+    return playlist
+
+
+@router.delete('/{playlist_id}')
+def delete_playlist(playlist_id: int, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    playlist = db.query(Playlist).filter(Playlist.id == playlist_id, Playlist.user_id == user_id).first()
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    # delete playlist tracks first to satisfy FK constraints
+    db.query(PlaylistTrack).filter(PlaylistTrack.playlist_id == playlist_id).delete()
+    db.delete(playlist)
+    db.commit()
+    return {"deleted": True}
 
 @router.get('/track-memberships/{track_id}', response_model=list[int])
 def track_memberships(track_id: int, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):

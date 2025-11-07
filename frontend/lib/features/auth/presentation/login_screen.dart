@@ -75,7 +75,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         : ElevatedButton(
                             onPressed: () async {
                               final ok = await _performAction();
-                              if (ok && mounted) {
+                              if (!mounted) return;
+                              if (ok) {
                                 if (!_isLogin) {
                                   context.go('/onboarding');
                                 } else {

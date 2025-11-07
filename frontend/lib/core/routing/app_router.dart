@@ -10,6 +10,8 @@ import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/onboarding_screen.dart';
 import '../../features/settings/presentation/settings_screen.dart';
 import '../../features/auth/presentation/preferred_artists_screen.dart';
+import '../../features/auth/presentation/profile_screen.dart';
+import '../../features/track/presentation/upload_track_screen.dart';
 import '../../features/auth/application/auth_providers.dart';
 import '../../features/playlist/presentation/playlist_screen.dart';
 import '../../features/playlist/presentation/playlist_detail_screen.dart';
@@ -28,6 +30,7 @@ class ShellScaffold extends ConsumerWidget {
     if (location.startsWith('/recommend')) return 1;
     if (location.startsWith('/playlists')) return 2;
     if (location.startsWith('/search')) return 3;
+    if (location.startsWith('/settings')) return 4;
     return 0;
   }
 
@@ -59,6 +62,9 @@ class ShellScaffold extends ConsumerWidget {
               case 3:
                 context.go('/search');
                 break;
+              case 4:
+                context.go('/settings');
+                break;
           }
         },
         destinations: const [
@@ -66,6 +72,7 @@ class ShellScaffold extends ConsumerWidget {
           NavigationDestination(icon: Icon(Icons.auto_awesome), label: 'For You'),
           NavigationDestination(icon: Icon(Icons.library_music_outlined), label: 'Playlists'),
           NavigationDestination(icon: Icon(Icons.search), label: 'Search'),
+          NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
     );
@@ -106,6 +113,8 @@ class AppRouter {
               GoRoute(path: '/playlists', builder: (c, s) => const PlaylistScreen()),
               GoRoute(path: '/search', builder: (c, s) => const SearchTrackScreen()),
               GoRoute(path: '/preferred-artists', builder: (c, s) => const PreferredArtistsScreen()),
+              GoRoute(path: '/profile', builder: (c, s) => const ProfileScreen()),
+              GoRoute(path: '/upload', builder: (c, s) => const UploadTrackScreen()),
               GoRoute(path: '/artist-tracks', builder: (c, s) {
                 final extra = s.extra as Map<String, dynamic>?;
                 final ids = extra != null && extra['artistIds'] is List ? List<int>.from(extra['artistIds']) : <int>[];

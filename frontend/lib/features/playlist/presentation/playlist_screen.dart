@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../application/playlist_providers.dart';
 import '../../like/presentation/liked_songs_screen.dart';
 import 'playlist_detail_screen.dart';
+import '../../../data/repositories/playlist_repository.dart';
 
 class PlaylistScreen extends ConsumerWidget {
   const PlaylistScreen({super.key});
@@ -106,7 +107,9 @@ class PlaylistScreen extends ConsumerWidget {
                   : () async {
                       final ok = await r.read(createPlaylistControllerProvider.notifier)
                           .create(nameCtrl.text.trim(), description: descCtrl.text.trim().isEmpty ? null : descCtrl.text.trim());
-                      if (ok && context.mounted) Navigator.pop(ctx);
+                      if (ok && context.mounted) {
+                        Navigator.pop(ctx);
+                      }
                     },
               child: state.loading ? const SizedBox(height:16,width:16,child:CircularProgressIndicator(strokeWidth:2)) : const Text('Tạo'),
             );
@@ -155,14 +158,23 @@ class PlaylistScreen extends ConsumerWidget {
                 );
                 return;
               }
-              // TODO: Call API to update playlist
-              Navigator.pop(ctx);
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Đã cập nhật playlist')),
-                );
-                ref.invalidate(myPlaylistsProvider);
-              }
+                  try {
+                    final repo = ref.read(playlistRepositoryProvider);
+                    await repo.update(id, name: newName, description: descCtrl.text.trim().isEmpty ? null : descCtrl.text.trim());
+                    Navigator.pop(ctx);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Đã cập nhật playlist')),
+                      );
+                      ref.invalidate(myPlaylistsProvider);
+                    }
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Lỗi cập nhật: $e')),
+                      );
+                    }
+                  }
             },
             child: const Text('Lưu'),
           ),
@@ -182,14 +194,23 @@ class PlaylistScreen extends ConsumerWidget {
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {
-              // TODO: Call API to delete playlist
-              Navigator.pop(ctx);
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Đã xóa "$name"')),
-                );
-                ref.invalidate(myPlaylistsProvider);
-              }
+                  try {
+                    final repo = ref.read(playlistRepositoryProvider);
+                    await repo.delete(id);
+                    Navigator.pop(ctx);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Đã xóa "$name"')),
+                      );
+                      ref.invalidate(myPlaylistsProvider);
+                    }
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Lỗi xóa: $e')),
+                      );
+                    }
+                  }
             },
             child: const Text('Xóa'),
           ),

@@ -4,6 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from .core.config import get_settings
 from .routers import recommend, tracks, health, auth, interactions, playlists, deezer, onboard, artists, chat, mood
 from .core.db import engine, Base
+from .core.db import SessionLocal
+from .services.ml_recommendation_service import ml_recommendation_service
 
 settings = get_settings()
 
@@ -43,6 +45,15 @@ else:
 def on_startup():
     # Auto-create tables in dev (replace with Alembic in production)
     Base.metadata.create_all(bind=engine)
+    # Ensure ML model is trained/loaded at startup (will retrain if metadata missing)
+    try:
+        db = SessionLocal()
+        try:
+            ml_recommendation_service.ensure_model_trained(db)
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"⚠️  ML ensure_model_trained failed at startup: {e}")
 
 app.include_router(health.router)
 app.include_router(auth.router)

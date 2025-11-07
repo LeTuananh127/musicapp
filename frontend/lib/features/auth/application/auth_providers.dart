@@ -106,6 +106,11 @@ class AuthController extends StateNotifier<AuthState> {
     }
   }
 
+  /// Update local state for display name after server-side change.
+  void setDisplayName(String? displayName) {
+    state = state.copyWith(displayName: displayName);
+  }
+
   /// Mark onboarding as completed on the client so router won't redirect away from onboarding flow.
   Future<void> completeOnboarding() async {
     state = state.copyWith(needsOnboarding: false);

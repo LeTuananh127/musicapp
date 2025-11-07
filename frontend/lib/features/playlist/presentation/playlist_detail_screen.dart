@@ -6,7 +6,6 @@ import '../application/playlist_providers.dart';
 import '../../like/application/like_providers.dart';
 import '../../player/application/player_providers.dart';
 import '../../../data/models/track.dart';
-import '../../../data/repositories/playlist_repository.dart';
 import '../../../shared/providers/dio_provider.dart';
 import '../../../shared/services/shuffle_state_manager.dart';
 
@@ -136,21 +135,24 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                   ? const Center(child: Text('Playlist trống'))
                   : Builder(builder: (ctx) {
                       // initialize shuffle/chunks once per playlist load
-                      if (!_initializedForPlaylist) {
-                        _prepareChunks(list
-                            .map((e) => {
-                                  'id': e.trackId,
-                                  'title': e.title ?? 'Track ${e.trackId}',
-                                  'artist_name': e.artistName ?? 'N/A',
-                                  'duration_ms': e.durationMs ?? 0,
-                                  'cover_url': e.coverUrl ?? '',
-                                  // Use backend proxy instead of direct Deezer CDN
-                                  'preview_url': e.trackId > 0
-                                      ? 'http://127.0.0.1:8000/deezer/stream/${e.trackId}'
-                                      : '',
-                                })
-                            .toList());
-                      }
+            if (!_initializedForPlaylist) {
+            // Build preview_url using configured backend base URL so
+            // emulator/device networking (10.0.2.2 / ngrok) is respected.
+            final base = ref.read(appConfigProvider).apiBaseUrl;
+            _prepareChunks(list
+              .map((e) => {
+                  'id': e.trackId,
+                  'title': e.title ?? 'Track ${e.trackId}',
+                  'artist_name': e.artistName ?? 'N/A',
+                  'duration_ms': e.durationMs ?? 0,
+                  'cover_url': e.coverUrl ?? '',
+                  // Use backend proxy instead of direct Deezer CDN
+                  'preview_url': e.trackId > 0
+                    ? '$base/deezer/stream/${e.trackId}'
+                    : '',
+                })
+              .toList());
+            }
 
                       final pageCount = _chunks.isEmpty ? 1 : _chunks.length;
                       final currentChunk = _chunks.isEmpty
@@ -256,7 +258,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                                         ),
                                         subtitle: Text(t['artist_name'] ?? 'N/A'),
                                         tileColor: isCurrent
-                                            ? Colors.green.withOpacity(0.06)
+                                            ? Colors.green.withValues(alpha: 0.06)
                                             : null,
                                         onTap: () {
                                           final ctrl = ref.read(

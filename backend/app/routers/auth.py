@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
+from typing import Optional
 from ..core.db import get_db
 from ..models.music import User
 from ..core.security import hash_password, verify_password, create_access_token, decode_token
@@ -25,6 +26,15 @@ class MeResponse(BaseModel):
     id: int
     email: EmailStr
     display_name: str | None = None
+
+
+class UpdateMeRequest(BaseModel):
+    display_name: Optional[str] = None
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
 
 @router.post('/register', response_model=TokenResponse)
 async def register(request: Request, db: Session = Depends(get_db)):
@@ -54,6 +64,7 @@ async def register(request: Request, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
+    # No retrain here: retraining is triggered only on new interactions to avoid frequent retrains
     token = create_access_token(str(user.id))
     return TokenResponse(access_token=token, user_id=user.id)
 
@@ -118,3 +129,34 @@ def _get_current_user(request: Request, db: Session) -> User:
 async def me(request: Request, db: Session = Depends(get_db)):
     user = _get_current_user(request, db)
     return MeResponse(id=user.id, email=user.email, display_name=user.display_name)
+
+
+@router.patch('/me', response_model=MeResponse)
+async def update_me(payload: UpdateMeRequest, request: Request, db: Session = Depends(get_db)):
+    """Update simple profile fields like display_name."""
+    user = _get_current_user(request, db)
+    updated = False
+    if payload.display_name is not None:
+        user.display_name = payload.display_name
+        updated = True
+    if updated:
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    return MeResponse(id=user.id, email=user.email, display_name=user.display_name)
+
+
+@router.post('/me/password')
+async def change_password(payload: ChangePasswordRequest, request: Request, db: Session = Depends(get_db)):
+    """Change the current user's password. Requires the old password for verification.
+
+    Returns 200 on success, 400 if verification fails.
+    """
+    user = _get_current_user(request, db)
+    if not verify_password(payload.old_password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Old password is incorrect")
+    # set new password hash
+    user.password_hash = hash_password(payload.new_password)
+    db.add(user)
+    db.commit()
+    return {"ok": True}

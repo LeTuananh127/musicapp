@@ -269,7 +269,7 @@ class _LikedSongsScreenState extends ConsumerState<LikedSongsScreen> {
 
                           return ListTile(
                             tileColor: isCurrent
-                                ? Colors.green.withOpacity(0.06)
+                                ? Colors.green.withValues(alpha: 0.06)
                                 : null,
                             leading: SizedBox(
                                 width: 48, height: 48, child: leadingWidget),

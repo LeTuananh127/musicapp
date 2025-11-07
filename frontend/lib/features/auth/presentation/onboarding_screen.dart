@@ -18,6 +18,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   List<Map<String, dynamic>> _artists = [];
   bool _loading = true;
   String? _error;
+  // ids currently animating (fading out) after tap
+  final Set<int> _fading = {};
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchCtrl = TextEditingController();
   Timer? _debounce;
@@ -58,7 +60,14 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         if (q.isNotEmpty) 'q': q,
       });
       final List data = res.data is Map ? res.data['value'] ?? res.data : res.data;
-      final items = data.map((e) => {'id': e['id'], 'name': e['name'] ?? e['title'] ?? 'Unknown'}).toList();
+    // Map artist items; prefer cover_url if present
+    final items = data
+      .map((e) => {
+        'id': e['id'],
+        'name': e['name'] ?? e['title'] ?? 'Unknown',
+        'cover_url': e['cover_url'] ?? e['cover'] ?? e['image'] ?? null,
+        })
+      .toList();
       if (loadMore) { // Added loadMore parameter to the method signature
         _artists.addAll(items);
       } else {
@@ -72,10 +81,25 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     setState(() { _loading = false; });
   }
 
-  void _toggle(int id) {
+  String? _resolveMediaUrl(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    if (raw.startsWith('http')) return raw;
+    final base = ref.read(appConfigProvider).apiBaseUrl;
+    return '$base${raw.startsWith('/') ? '' : '/'}$raw';
+  }
+
+  // previous toggle behavior removed — UX uses tap-to-select-and-remove
+
+  void _selectAndRemove(int id) async {
+    if (_selected.contains(id) || _fading.contains(id)) return;
+    setState(() => _fading.add(id));
+    // short fade animation then remove from grid and mark selected
+    await Future.delayed(const Duration(milliseconds: 260));
+    if (!mounted) return;
     setState(() {
-      if (_selected.contains(id)) _selected.remove(id);
-      else _selected.add(id);
+      _fading.remove(id);
+      _selected.add(id);
+      _artists.removeWhere((a) => (a['id'] as int) == id);
     });
   }
 
@@ -107,8 +131,10 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       content: Text('${playlists.length} playlist(s) suggested'),
       duration: const Duration(seconds: 2),
     ));
+    if (context.mounted) {
+      context.go('/recommend');
+    }
   }
-  if (context.mounted) context.go('/recommend');
     } catch (e) {
       setState(() => _error = 'Gửi lựa chọn thất bại');
     }
@@ -117,11 +143,14 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(title: const Text('Chọn nghệ sĩ yêu thích')),
-      body: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Column(
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: Column(
           children: [
             const Text('Chọn ít nhất 3 nghệ sĩ bạn thích để nhận gợi ý phù hợp', textAlign: TextAlign.center),
             const SizedBox(height: 8),
@@ -137,33 +166,98 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
             Expanded(
               child: _artists.isEmpty && _loading
                   ? const Center(child: CircularProgressIndicator())
-                  : ListView.builder(
+                  : CustomScrollView(
                       controller: _scrollController,
-                      itemCount: _artists.length + (_hasMore ? 1 : 0),
-                      itemBuilder: (c, i) {
-                        if (i >= _artists.length) return const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()));
-                        final a = _artists[i];
-                        final id = a['id'] as int;
-                        final selected = _selected.contains(id);
-                        return ListTile(
-                          title: Text(a['name']),
-                          trailing: IconButton(
-                            icon: Icon(selected ? Icons.check_box : Icons.check_box_outline_blank),
-                            onPressed: () => _toggle(id),
+                      slivers: [
+                        SliverPadding(
+                          padding: EdgeInsets.fromLTRB(8, 8, 8, 8 + bottomInset),
+                          sliver: SliverGrid.builder(
+                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 3,
+                              mainAxisSpacing: 8,
+                              crossAxisSpacing: 8,
+                              childAspectRatio: 0.9,
+                            ),
+                            itemCount: _artists.length + (_hasMore ? 1 : 0),
+                            itemBuilder: (context, i) {
+                              if (i >= _artists.length) return const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()));
+                              final a = _artists[i];
+                              final id = a['id'] as int;
+                              final coverRaw = a['cover_url'] as String?;
+                              final resolvedCover = _resolveMediaUrl(coverRaw);
+                              return GestureDetector(
+                                onTap: () => _selectAndRemove(id),
+                                child: AnimatedSize(
+                                  duration: const Duration(milliseconds: 300),
+                                  curve: Curves.easeInOut,
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.center,
+                                    children: [
+                                      AnimatedOpacity(
+                                        duration: const Duration(milliseconds: 300),
+                                        opacity: _fading.contains(id) ? 0.0 : 1.0,
+                                        child: AspectRatio(
+                                          aspectRatio: 1,
+                                          child: Container(
+                                            color: Colors.grey.shade200,
+                                            child: resolvedCover != null
+                                                ? ClipRRect(
+                                                    borderRadius: BorderRadius.circular(12),
+                                                    child: Image.network(
+                                                      resolvedCover,
+                                                      fit: BoxFit.cover,
+                                                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                                                    ),
+                                                  )
+                                                : const Center(child: Icon(Icons.person, size: 40, color: Colors.black45)),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      AnimatedOpacity(
+                                        duration: const Duration(milliseconds: 260),
+                                        opacity: _fading.contains(id) ? 0.0 : 1.0,
+                                        child: Text(a['name'], maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
                           ),
-                          onTap: () => _toggle(id),
-                        );
-                      },
+                        ),
+                      ],
                     ),
             ),
             const SizedBox(height: 8),
-            ElevatedButton(onPressed: _loading ? null : _submit, child: const Text('Hoàn tất'))
           ],
+        ),
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+          child: SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton(onPressed: _loading ? null : _submit, child: const Text('Hoàn tất')),
+          ),
         ),
       ),
     );
+
   }
 
+  // Helper to compute threshold close to max scroll extent to trigger loadMore safely
+  double _scroll_controller_maxExtentThreshold() {
+    try {
+      return _scrollController.position.maxScrollExtent - 200;
+    } catch (_) {
+      return double.infinity;
+    }
+  }
+  
   @override
   void dispose() {
     _scrollController.dispose();

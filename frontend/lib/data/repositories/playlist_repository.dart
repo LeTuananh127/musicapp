@@ -15,6 +15,8 @@ abstract class IPlaylistRepository {
   Future<Playlist> create(String name, {String? description, bool isPublic});
   Future<void> addTrack(int playlistId, int trackId);
   Future<void> removeTrack(int playlistId, int trackId);
+  Future<Playlist> update(int id, {String? name, String? description, bool? isPublic});
+  Future<void> delete(int id);
   Future<List<Playlist>> refresh();
 }
 
@@ -81,6 +83,23 @@ class PlaylistRepository implements IPlaylistRepository {
       return Playlist(id: e['id'], name: e['name'], description: e['description'], isPublic: e['is_public']);
     }
     throw Exception('Create playlist failed');
+  }
+
+  Future<Playlist> update(int id, {String? name, String? description, bool? isPublic}) async {
+    final res = await _dio.patch('$baseUrl/playlists/$id', data: {
+      if (name != null) 'name': name,
+      if (description != null) 'description': description,
+      if (isPublic != null) 'is_public': isPublic,
+    });
+    if (res.statusCode == 200 && res.data != null) {
+      final e = res.data;
+      return Playlist(id: e['id'], name: e['name'], description: e['description'], isPublic: e['is_public']);
+    }
+    throw Exception('Update playlist failed');
+  }
+
+  Future<void> delete(int id) async {
+    await _dio.delete('$baseUrl/playlists/$id');
   }
 
   @override

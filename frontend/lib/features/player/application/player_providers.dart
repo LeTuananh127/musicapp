@@ -512,11 +512,18 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
       if (toCheck != null) {
         final idx = tracks.indexOf(t);
         if (!toCheck.contains(idx)) {
+          // Debug: skipping network probe due to limitChecks
+          // ignore: avoid_print
+          print('🔕 Skipping HEAD probe for ${t.id} (index $idx) - not in toCheck set');
           out.add(t);
           continue;
         }
       }
       try {
+        // Debug: attempting HEAD probe
+        final idx = tracks.indexOf(t);
+        // ignore: avoid_print
+        print('🔍 Probing HEAD for ${t.id} (index $idx) -> $url');
         // Try HEAD first
         final resp = await dio.head(t.previewUrl!,
             options: Options(validateStatus: (s) => s != null));
@@ -613,8 +620,9 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
                     headers: {'Range': 'bytes=0-1'},
                     validateStatus: (s) => s != null));
             final sc2 = r2.statusCode ?? 0;
-            if (sc2 == 401 || sc2 == 403 || (sc2 >= 400 && sc2 < 500))
+            if (sc2 == 401 || sc2 == 403 || (sc2 >= 400 && sc2 < 500)) {
               forbidden = true;
+            }
           } catch (_) {
             // network error -> be conservative and do not remove
             forbidden = false;
@@ -630,8 +638,9 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
                   headers: {'Range': 'bytes=0-1'},
                   validateStatus: (s) => s != null));
           final sc2 = r2.statusCode ?? 0;
-          if (sc2 == 401 || sc2 == 403 || (sc2 >= 400 && sc2 < 500))
+          if (sc2 == 401 || sc2 == 403 || (sc2 >= 400 && sc2 < 500)) {
             forbidden = true;
+          }
         } catch (_) {
           // network error -> don't remove aggressively
           forbidden = false;
@@ -877,26 +886,8 @@ class PlayerController extends StateNotifier<PlayerStateModel> {
     if (track == null) return;
     final repo = ref.read(interactionRepositoryProvider);
     final seconds = state.position.inSeconds;
-    // If previewUrl points to our Deezer proxy, send as external play
-    if (track.previewUrl != null &&
-        track.previewUrl!.contains('/deezer/stream/')) {
-      try {
-        // extract external id from URL path /deezer/stream/{id}
-        final uri = Uri.parse(track.previewUrl!);
-        final segments = uri.pathSegments;
-        String? extId;
-        final idx = segments.indexOf('stream');
-        if (idx >= 0 && idx + 1 < segments.length) extId = segments[idx + 1];
-        if (extId != null) {
-          await repo.logExternalPlay(
-              externalTrackId: extId,
-              seconds: seconds,
-              completed: completed,
-              milestone: milestone);
-        }
-      } catch (_) {}
-      return;
-    }
+    // All tracks should log to track_id (including Deezer proxy streams)
+    // The track.id should contain the database track ID
     try {
       await repo.logPlay(
           trackId: int.tryParse(track.id) ?? 0,

@@ -129,7 +129,7 @@ class TrackDetailScreen extends ConsumerWidget {
                       // Line 1: small chip-like label
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(color: Theme.of(context).colorScheme.primary.withOpacity(0.12), borderRadius: BorderRadius.circular(8)),
+                        decoration: BoxDecoration(color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)),
                         child: Text('Đang phát từ:', style: TextStyle(color: Theme.of(context).colorScheme.primary)),
                       ),
                       const SizedBox(height: 6),

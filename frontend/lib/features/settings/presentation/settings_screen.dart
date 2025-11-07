@@ -45,6 +45,20 @@ class SettingsScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 12),
             FilledButton.icon(
+              // use push so the Profile screen is pushed on the navigation stack
+              // and the back button will return here
+              onPressed: () => context.push('/profile'),
+              icon: const Icon(Icons.person),
+              label: const Text('Hồ sơ của tôi'),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: () => context.push('/upload'),
+              icon: const Icon(Icons.cloud_upload),
+              label: const Text('Tải lên bài hát'),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
               onPressed: () => context.go('/preferred-artists'),
               icon: const Icon(Icons.person_add_alt_1),
               label: const Text('Nghệ sĩ yêu thích'),

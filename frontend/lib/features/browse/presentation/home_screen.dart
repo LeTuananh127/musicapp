@@ -8,7 +8,7 @@ import '../../player/application/audio_error_provider.dart';
 import '../../playlist/application/playlist_providers.dart';
 import '../../../data/repositories/track_repository.dart';
 import '../../../shared/providers/dio_provider.dart';
-import 'package:go_router/go_router.dart';
+// go_router is not needed in this file after AppBar simplification
 
 // Tracks provider to avoid refetch on every rebuild
 final homeTracksProvider = FutureProvider.autoDispose((ref) async {
@@ -38,11 +38,6 @@ class HomeScreen extends ConsumerWidget {
         title: const Text('Home'),
         actions: [
           IconButton(
-            tooltip: 'Làm mới',
-            icon: const Icon(Icons.refresh),
-            onPressed: () => ref.invalidate(homeTracksProvider),
-          ),
-          IconButton(
             tooltip: 'Play All',
             icon: const Icon(Icons.play_arrow),
             onPressed: () {
@@ -56,16 +51,6 @@ class HomeScreen extends ConsumerWidget {
                 }
               });
             },
-          ),
-          IconButton(
-            tooltip: 'Deezer',
-            icon: const Icon(Icons.cloud),
-            onPressed: () => context.go('/deezer'),
-          ),
-          IconButton(
-            tooltip: 'Cài đặt',
-            icon: const Icon(Icons.settings),
-            onPressed: () => context.go('/settings'),
           ),
         ],
       ),
@@ -126,7 +111,7 @@ class HomeScreen extends ConsumerWidget {
                 },
                 title: Text(t.title),
                 subtitle: Text(t.artistName),
-                tileColor: isCurrent ? Colors.blue.withOpacity(0.06) : null,
+                tileColor: isCurrent ? Colors.blue.withValues(alpha: 0.06) : null,
                 leading: SizedBox(
                   width: 120,
                   child: Row(

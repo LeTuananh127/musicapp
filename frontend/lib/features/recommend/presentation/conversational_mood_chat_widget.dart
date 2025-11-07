@@ -102,10 +102,14 @@ class _ConversationalMoodChatWidgetState
     if (lower.contains(RegExp(r'\bangry\b'))) return 'angry';
     if (lower.contains(RegExp(r'\bsad\b'))) return 'sad';
     if (lower.contains(RegExp(r'\brelaxed\b')) ||
-        lower.contains(RegExp(r'\bcalm\b'))) return 'relaxed';
+        lower.contains(RegExp(r'\bcalm\b'))) {
+      return 'relaxed';
+    }
     if (lower.contains(RegExp(r'\benergetic\b'))) return 'energetic';
     if (lower.contains(RegExp(r'\bhappy\b')) ||
-        lower.contains(RegExp(r'\bjoyful\b'))) return 'happy';
+        lower.contains(RegExp(r'\bjoyful\b'))) {
+      return 'happy';
+    }
 
     return null;
   }
@@ -228,6 +232,7 @@ class _ConversationalMoodChatWidgetState
         },
         onPlayTrack: _playTrack,
         onAddToPlaylist: _showAddToPlaylistDialog,
+        onSaveAsPlaylist: (tracks) async => await _saveAsPlaylist(tracks),
       ),
     );
   }
@@ -245,6 +250,7 @@ class _ConversationalMoodChatWidgetState
         fetchMusicForMood: _fetchMusicForMood,
         onPlayTrack: _playTrack,
         onAddToPlaylist: _showAddToPlaylistDialog,
+        onSaveAsPlaylist: (tracks) async => await _saveAsPlaylist(tracks),
       ),
     );
   }
@@ -436,8 +442,10 @@ class _ConversationalMoodChatWidgetState
                           }
                           try {
                             await repo.addTrack(p.id, tid);
-                            if (mounted) {
+                            if (ctx.mounted) {
                               Navigator.pop(ctx);
+                            }
+                            if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                     content: Text(
@@ -474,6 +482,7 @@ class _ConversationalMoodChatWidgetState
     );
   }
 
+  // ignore: unused_element
   Future<void> _saveAsPlaylist(List<Track> tracks) async {
     if (tracks.isEmpty) return;
 
@@ -654,7 +663,7 @@ class _ConversationalMoodChatWidgetState
           if (chatState.detectedMood != null)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: Theme.of(context).primaryColor.withOpacity(0.1),
+              color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
               child: Row(
                 children: [
                   Icon(_getMoodIcon(chatState.detectedMood!)),
@@ -796,7 +805,7 @@ class _ConversationalMoodChatWidgetState
               color: Theme.of(context).cardColor,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
+                  color: Colors.black.withValues(alpha: 0.05),
                   blurRadius: 10,
                   offset: const Offset(0, -2),
                 ),
@@ -843,6 +852,7 @@ class _MusicLoadingSheet extends StatefulWidget {
   final Future<List<Track>> Function(String) fetchMusicForMood;
   final void Function(Track, List<Track>, int) onPlayTrack;
   final void Function(Track) onAddToPlaylist;
+  final Future<void> Function(List<Track>)? onSaveAsPlaylist;
 
   const _MusicLoadingSheet({
     required this.mood,
@@ -850,6 +860,7 @@ class _MusicLoadingSheet extends StatefulWidget {
     required this.fetchMusicForMood,
     required this.onPlayTrack,
     required this.onAddToPlaylist,
+    this.onSaveAsPlaylist,
   });
 
   @override
@@ -921,12 +932,18 @@ class _MusicLoadingSheetState extends State<_MusicLoadingSheet> {
                     ),
                     if (!_isLoading && _tracks != null && _tracks!.isNotEmpty)
                       IconButton(
-                        icon: const Icon(Icons.refresh, color: Colors.white),
-                        tooltip: 'Shuffle new tracks',
-                        onPressed: () {
-                          // This will be handled by parent widget
-                          Navigator.pop(context);
-                          // Parent needs to clear cache and reload
+                        icon: const Icon(Icons.playlist_add, color: Colors.white),
+                        tooltip: 'Save as playlist',
+                        onPressed: () async {
+                          // Save the loaded tracks as a playlist via parent callback
+                          try {
+                            if (widget.onSaveAsPlaylist != null && _tracks != null && _tracks!.isNotEmpty) {
+                              await widget.onSaveAsPlaylist!(_tracks!);
+                              if (mounted) Navigator.pop(context);
+                            }
+                          } catch (e) {
+                            // ignore - _loadTracks will show errors if needed
+                          }
                         },
                       ),
                     IconButton(
@@ -1098,6 +1115,7 @@ class _CachedMusicSheet extends ConsumerWidget {
   final VoidCallback onRefresh;
   final void Function(Track, List<Track>, int) onPlayTrack;
   final void Function(Track) onAddToPlaylist;
+  final Future<void> Function(List<Track>)? onSaveAsPlaylist;
 
   const _CachedMusicSheet({
     required this.mood,
@@ -1105,6 +1123,7 @@ class _CachedMusicSheet extends ConsumerWidget {
     required this.onRefresh,
     required this.onPlayTrack,
     required this.onAddToPlaylist,
+    this.onSaveAsPlaylist,
   });
 
   @override
@@ -1140,9 +1159,16 @@ class _CachedMusicSheet extends ConsumerWidget {
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.refresh, color: Colors.white),
-                  tooltip: 'Shuffle new tracks',
-                  onPressed: onRefresh,
+                  icon: const Icon(Icons.playlist_add, color: Colors.white),
+                  tooltip: 'Save as playlist',
+                  onPressed: () async {
+                    try {
+                      if (onSaveAsPlaylist != null) {
+                        await onSaveAsPlaylist!(tracks);
+                        Navigator.pop(context);
+                      }
+                    } catch (_) {}
+                  },
                 ),
                 IconButton(
                   icon: const Icon(Icons.close, color: Colors.white),

@@ -10,6 +10,12 @@ class Artist(Base):
     __tablename__ = 'artists'
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), index=True)
+    # optional artist cover image URL
+    cover_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # the user who created this artist (nullable)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey('users.id'), nullable=True)
+    # Use Optional[...] forward reference rather than a quoted union to satisfy SQLAlchemy
+    created_by_user: Mapped[Optional["User"]] = relationship('User', backref='created_artists')
     tracks: Mapped[list['Track']] = relationship(back_populates='artist')
 
 class Album(Base):
@@ -85,8 +91,9 @@ class Interaction(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
     # internal track id (nullable when recording external plays)
     track_id: Mapped[int | None] = mapped_column(ForeignKey('tracks.id'), nullable=True)
-    # external_track_id for plays originating from external providers (e.g., Deezer preview id)
-    external_track_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    # Note: we use internal `track_id` for interactions. External provider ids
+    # (e.g., Deezer preview ids) were previously tracked in `external_track_id`,
+    # but the application now records plays using the internal `track_id` only.
     played_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, index=True)
     seconds_listened: Mapped[int] = mapped_column(Integer, default=0)
     is_completed: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -100,6 +107,8 @@ class Playlist(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(String(500))
+    # optional cover image for the playlist (can be provided by client or derived from artist)
+    cover_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_public: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 

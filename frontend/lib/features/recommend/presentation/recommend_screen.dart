@@ -39,6 +39,8 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
   bool _loadingBehaviorTracks = false;
   String? _behaviorTracksError;
   List<Map<String, dynamic>> _behaviorTracks = [];
+  Future<void>? _behaviorTracksFuture;
+  List<Map<String, dynamic>>? _recommendedTracksGrid;
 
   // Shuffle state for virtual playlists section
   List<Map<String, dynamic>>? _virtualPlaylistsShuffled;
@@ -76,8 +78,11 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
 
   void _initializeData() {
     Future.microtask(() async {
-      await _ensurePlaylistsIfNeeded();
+      // Ensure we fetch artist ids first so the "Nghệ sĩ yêu thích" (favorite
+      // artists) horizontal section can populate even when onboarding
+      // playlists are already present.
       await _ensureArtistIds();
+      await _ensurePlaylistsIfNeeded();
       await _loadArtistTracksIfNeeded(force: true);
       await Future.wait([
         _loadFavoriteArtists(),
@@ -310,6 +315,20 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
   }
 
   Future<void> _loadBehaviorBasedTracks() async {
+    if (_behaviorTracksFuture != null) {
+      await _behaviorTracksFuture;
+      return;
+    }
+    
+    _behaviorTracksFuture = _fetchBehaviorTracksOnce();
+    try {
+      await _behaviorTracksFuture;
+    } catch (_) {
+      // error already handled in _fetchBehaviorTracksOnce
+    }
+  }
+
+  Future<void> _fetchBehaviorTracksOnce() async {
     if (mounted) {
       setState(() {
         _loadingBehaviorTracks = true;
@@ -318,12 +337,17 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
     }
     try {
       final items = await _fetchRecommendedTracks();
+      print('🤖 [AI Recommendations] Fetched ${items.length} tracks');
+      if (items.isNotEmpty) {
+        print('🤖 First track: ${items.first['title']} by ${items.first['artist_name']}');
+      }
       if (mounted) {
         setState(() {
           _behaviorTracks = items;
         });
       }
     } catch (e) {
+      print('❌ [AI Recommendations] Error: $e');
       if (mounted) {
         setState(() {
           _behaviorTracksError = e.toString();
@@ -340,6 +364,9 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
   }
 
   Future<void> _refreshAll() async {
+    // Clear futures to force refetch
+    _behaviorTracksFuture = null;
+    
     await _ensureArtistIds();
     await _loadArtistTracksIfNeeded(force: true);
     await Future.wait([
@@ -402,35 +429,43 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
                   builder: (ctx, snap) {
                     final List<Widget> children = [];
 
+                    // 1. Nghệ sĩ yêu thích (first)
                     final favoriteSection =
                         _buildFavoriteArtistsSection(context);
                     if (favoriteSection != null) {
                       children.add(favoriteSection);
                     }
 
-                    final topPlaysSection = _buildTopPlaysSection(context);
-                    if (topPlaysSection != null) {
-                      if (children.isNotEmpty)
-                        children.add(const SizedBox(height: 16));
-                      children.add(topPlaysSection);
-                    }
-
-                    final behaviorSection =
-                        _buildBehaviorPlaylistSection(context);
-                    if (behaviorSection != null) {
-                      if (children.isNotEmpty)
-                        children.add(const SizedBox(height: 16));
-                      children.add(behaviorSection);
-                    }
-
+                    // 2. Playlist nghệ sĩ tổng hợp (second)
                     final virtualSection =
                         _buildVirtualPlaylistsSection(context);
                     if (virtualSection.isNotEmpty) {
-                      if (children.isNotEmpty)
+                      if (children.isNotEmpty) {
                         children.add(const SizedBox(height: 16));
+                      }
                       children.addAll(virtualSection);
                     }
 
+                    // 3. AI Gợi ý cho bạn
+                    final behaviorSection =
+                        _buildBehaviorPlaylistSection(context);
+                    if (behaviorSection != null) {
+                      if (children.isNotEmpty) {
+                        children.add(const SizedBox(height: 16));
+                      }
+                      children.add(behaviorSection);
+                    }
+
+                    // 4. Top lượt nghe
+                    final topPlaysSection = _buildTopPlaysSection(context);
+                    if (topPlaysSection != null) {
+                      if (children.isNotEmpty) {
+                        children.add(const SizedBox(height: 16));
+                      }
+                      children.add(topPlaysSection);
+                    }
+
+                    // 5. Playlist đề xuất (last)
                     if (children.isNotEmpty) {
                       children.add(const SizedBox(height: 16));
                     }
@@ -501,28 +536,60 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
                       return Center(
                           child: Text('Lỗi tải bài hát: ${snap.error}'));
                     final list = snap.data ?? [];
-                    if (list.isEmpty)
-                      return const Center(
-                          child: Text('Không có đề xuất bài hát'));
-                    return ListView.builder(
-                      itemCount: list.length,
+                    if (_recommendedTracksGrid == null) {
+                      _recommendedTracksGrid = List<Map<String, dynamic>>.from(list);
+                    }
+                    final grid = _recommendedTracksGrid ?? [];
+                    if (grid.isEmpty) return const Center(child: Text('Không có đề xuất bài hát'));
+                    return GridView.builder(
+                      padding: const EdgeInsets.all(12),
+                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 3,
+                        crossAxisSpacing: 12,
+                        mainAxisSpacing: 12,
+                        childAspectRatio: 0.72,
+                      ),
+                      itemCount: grid.length,
                       itemBuilder: (c, i) {
-                        final t = list[i];
+                        final t = grid[i];
+                        final tid = t['track_id'];
                         final track = Track(
-                          id: t['track_id'].toString(),
-                          title: t['title'] ?? 'Track ${t['track_id']}',
+                          id: tid.toString(),
+                          title: t['title'] ?? 'Track $tid',
                           artistName: t['artist_name'] ?? '',
                           durationMs: (t['duration_ms'] as int?) ?? 0,
                         );
-                        return ListTile(
-                          title: Text(track.title),
-                          subtitle: Text(track.artistName),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.playlist_add),
-                            tooltip: 'Thêm vào playlist',
-                            onPressed: () =>
-                                _showAddToPlaylistSheet(context, ref, track),
-                          ),
+                        final rawCover = t['cover_url'] as String?;
+                        final resolvedCover = _resolveMediaUrl(rawCover);
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: _AnimatedTrackTile(
+                                track: t,
+                                coverUrl: resolvedCover,
+                                onRemove: () {
+                                  setState(() {
+                                    _recommendedTracksGrid?.removeAt(i);
+                                  });
+                                },
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                ),
+                                IconButton(
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                  icon: const Icon(Icons.playlist_add, size: 20),
+                                  onPressed: () => _showAddToPlaylistSheet(context, ref, track),
+                                ),
+                              ],
+                            ),
+                          ],
                         );
                       },
                     );
@@ -596,14 +663,26 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
       final auth = ref.read(authControllerProvider);
       final base = ref.read(appConfigProvider).apiBaseUrl;
       final uid = auth.userId;
-      if (uid == null) return [];
+      if (uid == null) {
+        print('🤖 [AI Recommendations] No user ID, skipping');
+        return [];
+      }
       
+      print('🤖 [AI Recommendations] Fetching for user $uid...');
       // Use ML recommendation endpoint with exclude_listened=false (recommend what user likes)
       final res = await dio.get('$base/recommend/user/$uid/ml?limit=20&exclude_listened=false',
           options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}));
       
+      print('🤖 [AI Recommendations] Response status: ${res.statusCode}');
+      print('🤖 [AI Recommendations] Response data type: ${res.data.runtimeType}');
+      
       final List data =
           res.data is Map ? res.data['value'] ?? res.data : res.data;
+      
+      print('🤖 [AI Recommendations] Data length: ${data.length}');
+      if (data.isEmpty) {
+        print('⚠️ [AI Recommendations] API returned empty array!');
+      }
       
       // ML endpoint returns full track metadata: {track_id, score, title, artist_name, duration_ms, cover_url, preview_url, ...}
       return data
@@ -654,6 +733,7 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
       return Future.error(e);
     }
   }
+
 
   void _showAddToPlaylistSheet(
       BuildContext context, WidgetRef ref, Track track) {
@@ -987,10 +1067,24 @@ class _RecommendScreenState extends ConsumerState<RecommendScreen> {
         }
         if (chunks.length > 1) title = '$title • part ${idx + 1}';
       }
+      // Use the first track's cover_url as the playlist cover (fallback to icon)
+      final String? _firstCoverRaw = chunk.isNotEmpty ? (chunk.first['cover_url'] as String?) : null;
+      final String? _firstCover = _resolveMediaUrl(_firstCoverRaw);
+
       tiles.add(Card(
         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         child: ListTile(
-          leading: const Icon(Icons.queue_music),
+          leading: CircleAvatar(
+            radius: 26,
+            backgroundColor:
+                Theme.of(context).colorScheme.surface.withOpacity(0.9),
+            backgroundImage:
+                _firstCover != null ? NetworkImage(_firstCover) : null,
+            child: _firstCover == null
+                ? Icon(Icons.queue_music,
+                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7))
+                : null,
+          ),
           title: Text(title),
           subtitle:
               Text('Playlist ${chunk.length} tracks từ các nghệ sĩ yêu thích'),
@@ -1174,6 +1268,72 @@ class _FavoriteArtistCard extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// Top-level animated track tile widget so it can be used from the State class.
+class _AnimatedTrackTile extends StatefulWidget {
+  final Map<String, dynamic> track;
+  final String? coverUrl;
+  final VoidCallback onRemove;
+  const _AnimatedTrackTile({required this.track, required this.onRemove, this.coverUrl, Key? key}) : super(key: key);
+
+  @override
+  State<_AnimatedTrackTile> createState() => _AnimatedTrackTileState();
+}
+
+class _AnimatedTrackTileState extends State<_AnimatedTrackTile> with SingleTickerProviderStateMixin {
+  bool _visible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // fade/scale in
+    Future.delayed(const Duration(milliseconds: 40), () {
+      if (mounted) setState(() => _visible = true);
+    });
+  }
+
+  Future<void> _handleTap() async {
+    if (!mounted) return;
+    setState(() => _visible = false);
+    await Future.delayed(const Duration(milliseconds: 280));
+    if (mounted) widget.onRemove();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.track;
+    final title = t['title'] ?? 'Track ${t['track_id']}';
+    final artist = t['artist_name'] ?? '';
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 260),
+      opacity: _visible ? 1.0 : 0.0,
+      child: AnimatedScale(
+        scale: _visible ? 1.0 : 0.95,
+        duration: const Duration(milliseconds: 260),
+        child: InkWell(
+          onTap: _handleTap,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AspectRatio(
+                aspectRatio: 1,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: widget.coverUrl != null
+                      ? Image.network(widget.coverUrl!, fit: BoxFit.cover, width: double.infinity, errorBuilder: (_, __, ___) => Container(color: Colors.grey.shade200))
+                      : Container(color: Colors.grey.shade200),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodyMedium),
+              Text(artist, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
+            ],
+          ),
         ),
       ),
     );

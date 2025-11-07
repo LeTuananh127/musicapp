@@ -36,4 +36,22 @@ class AuthRepository {
       return null;
     }
   }
+
+  Future<bool> updateMe(String token, Map<String, dynamic> payload) async {
+    try {
+      final res = await _dio.patch('$baseUrl/auth/me', data: payload, options: Options(headers: {'Authorization': 'Bearer $token'}));
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> changePassword(String token, String oldPassword, String newPassword) async {
+    try {
+      final res = await _dio.post('$baseUrl/auth/me/password', data: {'old_password': oldPassword, 'new_password': newPassword}, options: Options(headers: {'Authorization': 'Bearer $token'}));
+      return res.statusCode == 200 && res.data != null;
+    } catch (_) {
+      return false;
+    }
+  }
 }

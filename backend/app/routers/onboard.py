@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+import logging
 from sqlalchemy.orm import Session
 from typing import List
 from ..core.db import get_db
 from ..models.music import UserPreferredArtist, Playlist, PlaylistTrack, Track, Interaction
-from sqlalchemy import func, distinct, or_, cast, String
+from sqlalchemy import func, distinct
 from ..routers.auth import _get_current_user as _get_current_user
 
 
@@ -14,6 +15,8 @@ from pydantic import BaseModel
 from datetime import datetime
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 class PreferredArtistsIn(BaseModel):
     artist_ids: List[int]
@@ -33,12 +36,46 @@ async def set_preferred_artists(payload: PreferredArtistsIn, db: Session = Depen
         up = UserPreferredArtist(user_id=user_id, artist_id=aid, created_at=datetime.utcnow())
         db.add(up)
     db.commit()
-    return {"status": "ok", "count": len(payload.artist_ids)}
+    # Log for debugging
+    logger.info('set_preferred_artists: user_id=%s count=%s', user_id, len(payload.artist_ids))
+    # Return the persisted list (authoritative) to the client
+    rows = db.query(UserPreferredArtist.artist_id).filter(UserPreferredArtist.user_id == user_id).all()
+    return [r[0] for r in rows]
 
 
 @router.get('/users/me/preferences/artists', response_model=List[int])
 async def get_preferred_artists(db: Session = Depends(get_db), user=Depends(get_current_user)):
     user_id = user.id
+    rows = db.query(UserPreferredArtist.artist_id).filter(UserPreferredArtist.user_id == user_id).all()
+    return [r[0] for r in rows]
+
+
+@router.delete('/users/me/preferences/artists/{artist_id}')
+async def delete_preferred_artist(artist_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    user_id = user.id
+    deleted = db.query(UserPreferredArtist).filter(
+        UserPreferredArtist.user_id == user_id,
+        UserPreferredArtist.artist_id == artist_id
+    ).delete()
+    db.commit()
+    if deleted:
+        logger.info('delete_preferred_artist: user_id=%s deleted=%s', user_id, artist_id)
+        return {"status": "ok", "deleted": artist_id}
+    else:
+        raise HTTPException(status_code=404, detail="Artist not found in preferences")
+
+
+@router.post('/users/me/preferences/artists/{artist_id}')
+async def add_preferred_artist(artist_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Add a single preferred artist for the current user. Returns the persisted list of artist ids."""
+    user_id = user.id
+    # Check if already exists
+    exists = db.query(UserPreferredArtist).filter(UserPreferredArtist.user_id == user_id, UserPreferredArtist.artist_id == artist_id).first()
+    if not exists:
+        up = UserPreferredArtist(user_id=user_id, artist_id=artist_id, created_at=datetime.utcnow())
+        db.add(up)
+        db.commit()
+    # Return authoritative persisted list
     rows = db.query(UserPreferredArtist.artist_id).filter(UserPreferredArtist.user_id == user_id).all()
     return [r[0] for r in rows]
 
@@ -58,12 +95,9 @@ async def recommend_playlists(artists: str, db: Session = Depends(get_db)):
     plays_weight = 1
     match_weight = 10
 
-    # count interactions that reference either the internal track_id or the external_track_id
-    # aggregate total seconds listened for matched tracks, then convert to equivalent plays
+    # Count interactions by track_id only (no longer using external_track_id)
+    # Aggregate total seconds listened for matched tracks, then convert to equivalent plays
     seconds_per_equivalent_play = 30.0
-    # ensure the string comparison uses the same collation to avoid MySQL collation mix errors
-    ext_cast = cast(Track.id, String).collate('utf8mb4_unicode_ci')
-    ext_col = Interaction.external_track_id.collate('utf8mb4_unicode_ci')
 
     stmt = (
         db.query(
@@ -74,7 +108,7 @@ async def recommend_playlists(artists: str, db: Session = Depends(get_db)):
         )
         .join(PlaylistTrack, Playlist.id == PlaylistTrack.playlist_id)
         .join(Track, Track.id == PlaylistTrack.track_id)
-    .outerjoin(Interaction, or_(Interaction.track_id == Track.id, ext_col == ext_cast))
+        .outerjoin(Interaction, Interaction.track_id == Track.id)
         .filter(Track.artist_id.in_(artist_ids))
         .group_by(Playlist.id, Playlist.name)
     )

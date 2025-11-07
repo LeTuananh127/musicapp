@@ -23,7 +23,7 @@ def list_artists(
         query = query.filter(Artist.name.ilike(f"%{q}%"))
     query = query.order_by(Artist.name).offset(offset).limit(limit)
     rows = query.all()
-    out = [{'id': a.id, 'name': a.name} for a in rows]
+    out = [{'id': a.id, 'name': a.name, 'cover_url': getattr(a, 'cover_url', None)} for a in rows]
     return out
 
 
@@ -35,7 +35,7 @@ def artists_by_ids(ids: str, db: Session = Depends(get_db)):
     except Exception:
         raise HTTPException(status_code=400, detail='Invalid ids param')
     rows = db.query(Artist).filter(Artist.id.in_(id_list)).all()
-    return [{'id': a.id, 'name': a.name} for a in rows]
+    return [{'id': a.id, 'name': a.name, 'cover_url': getattr(a, 'cover_url', None)} for a in rows]
 
 
 @router.get('/artists/tracks')

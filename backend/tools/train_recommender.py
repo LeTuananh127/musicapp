@@ -137,11 +137,25 @@ def train_als(sparse_mat, factors=64, iterations=10, regularization=0.1):
         return user_factors, item_factors
 
 
-def save_model(path, user_map, item_map, user_factors, item_factors):
+def save_model(path, user_map, item_map, user_factors, item_factors, interaction_count: int | None = None):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     user_ids = np.array([u for u, _ in sorted(user_map.items(), key=lambda x: x[1])], dtype=np.int32)
     track_ids = np.array([t for t, _ in sorted(item_map.items(), key=lambda x: x[1])], dtype=np.int32)
     np.savez_compressed(path, user_ids=user_ids, track_ids=track_ids, user_factors=user_factors, item_factors=item_factors)
+    # Write metadata about this training run so service can decide if retraining is needed
+    try:
+        import json
+        meta = {
+            'user_count': len(user_map),
+            'interaction_count': int(interaction_count or 0),
+            'timestamp': __import__('datetime').datetime.utcnow().isoformat(),
+        }
+        meta_path = os.path.join(os.path.dirname(path), 'model.meta.json')
+        with open(meta_path, 'w', encoding='utf-8') as mf:
+            json.dump(meta, mf)
+        print(f'Wrote model metadata to {meta_path}')
+    except Exception as e:
+        print(f'Could not write model metadata: {e}')
 
 
 def main():
@@ -162,7 +176,7 @@ def main():
         mat = build_sparse(user_map, item_map, data)
         print('Starting ALS training (this may take a while)...')
         user_factors, item_factors = train_als(mat, factors=args.factors, iterations=args.iterations, regularization=args.regularization)
-        save_model(args.output, user_map, item_map, user_factors, item_factors)
+        save_model(args.output, user_map, item_map, user_factors, item_factors, interaction_count=len(data))
         print('Model saved to', args.output)
     finally:
         db.close()
