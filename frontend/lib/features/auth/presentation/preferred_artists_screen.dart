@@ -254,13 +254,20 @@ class _PreferredArtistsScreenState extends ConsumerState<PreferredArtistsScreen>
           },
         ),
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
+    // Wrap body with SafeArea so content won't be obscured by system UI or
+    // the bottom navigation button. Also add extra bottom padding for the
+    // GridView so its content can't underflow behind the bottom bar.
+    body: SafeArea(
+    top: false,
+    bottom: true,
+    child: _loading
+      ? const Center(child: CircularProgressIndicator())
+      : Column(
               children: [
                 /// ✅ Selected Artists
                 SizedBox(
-                  height: 110,
+                  // Slightly reduced height to give more vertical space on small screensr
+                  height: 140,
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     itemCount: _selected.length,
@@ -316,7 +323,10 @@ class _PreferredArtistsScreenState extends ConsumerState<PreferredArtistsScreen>
                 Expanded(
                   child: GridView.builder(
                     itemCount: _available.length,
-                    padding: const EdgeInsets.all(12),
+                    // add extra bottom padding so grid doesn't get clipped by the
+                    // Scaffold's bottomNavigationBar (and leaves breathing room)
+                    // increase bottom padding to ensure grid never underflows
+                    padding: EdgeInsets.fromLTRB(12, 12, 12, MediaQuery.of(context).viewPadding.bottom + 160),
                     gridDelegate:
                         const SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: 3,
@@ -351,8 +361,9 @@ class _PreferredArtistsScreenState extends ConsumerState<PreferredArtistsScreen>
                   ),
                 ),
               ],
-            ),
-      bottomNavigationBar: Padding(
+    ),
+    ),
+  bottomNavigationBar: Padding(
         padding: const EdgeInsets.all(12),
         child: ElevatedButton(
           onPressed: _saving ? null : _save,

@@ -1,12 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, Form, Query, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from ..core.db import get_db
+from ..core.db import get_db, SessionLocal
 from ..models.music import Track, TrackLike, Artist, User
 import math
 from io import BytesIO
+import asyncio
+import httpx
+import aiofiles
+from mutagen import File as MutagenFile
 import struct
 import os
+import re
 from typing import List
 from sqlalchemy import or_
 from ..models.music import Artist
@@ -78,6 +83,9 @@ async def upload_track(
     if artist_id is not None:
         artist = db.query(Artist).filter(Artist.id == artist_id).first()
     if not artist:
+        # Prefer an existing Artist record owned by the user (avoid creating duplicates)
+        artist = db.query(Artist).filter(Artist.created_by == current_user.id).order_by(Artist.id.asc()).first()
+    if not artist:
         # create a new artist using current user's display_name if available
         artist_name = current_user.display_name or current_user.email or f'Artist {current_user.id}'
         artist = Artist(name=artist_name, cover_url=None, created_by=current_user.id)
@@ -95,6 +103,13 @@ async def upload_track(
     audio_path = os.path.join(audio_dir, f'{track.id}{ext}')
     with open(audio_path, 'wb') as f:
         f.write(await audio.read())
+    # detect duration if not provided
+    try:
+        dur = _get_duration_ms_for_file(audio_path)
+        if dur and (not track.duration_ms or track.duration_ms == 0):
+            track.duration_ms = dur
+    except Exception:
+        pass
     # set preview_url
     track.preview_url = f'/tracks/{track.id}/preview'
     if cover:
@@ -133,6 +148,7 @@ async def bulk_create_tracks(
 @router.post('/create', response_model=TrackOut)
 async def create_track_with_urls(
     payload: dict,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(_get_current_user),
 ):
@@ -147,10 +163,14 @@ async def create_track_with_urls(
     cover_url = payload.get('cover_url')
     if not title:
         raise HTTPException(status_code=400, detail='Missing title')
-    # Ensure artist exists; if artist_id not provided or invalid, create new artist for current user
+    # Ensure artist exists; if artist_id provided use it, otherwise prefer an existing Artist
+    # owned by the current user; create one only if none exists.
     artist = None
     if artist_id:
         artist = db.query(Artist).filter(Artist.id == artist_id).first()
+    if not artist:
+        # prefer reuse of an existing artist created by this user
+        artist = db.query(Artist).filter(Artist.created_by == current_user.id).order_by(Artist.id.asc()).first()
     if not artist:
         artist_name = current_user.display_name or current_user.email or f'Artist {current_user.id}'
         artist = Artist(name=artist_name, cover_url=None, created_by=current_user.id)
@@ -166,6 +186,9 @@ async def create_track_with_urls(
     db.add(tr)
     db.commit()
     db.refresh(tr)
+    # schedule background download of external audio/cover (if provided)
+    if audio_url or cover_url:
+        background_tasks.add_task(_fetch_and_save_external_assets, tr.id, audio_url, cover_url)
     return tr
 
 @router.api_route('/{track_id}/preview', methods=['GET', 'HEAD'])
@@ -288,3 +311,166 @@ def increment_view(track_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     return {"views": tr.views}
+
+async def _download_to_file(url: str, path: str, timeout: float = 60.0):
+    """Stream-download an external URL to a local file path using httpx and aiofiles."""
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        async with client.stream('GET', url) as resp:
+            resp.raise_for_status()
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            async with aiofiles.open(path, 'wb') as f:
+                async for chunk in resp.aiter_bytes(chunk_size=8192):
+                    if not chunk:
+                        continue
+                    await f.write(chunk)
+
+
+def _convert_drive_url(url: str) -> str:
+    """Convert common Google Drive share URLs to a direct-download form when possible.
+
+    Examples:
+      - https://drive.google.com/file/d/<ID>/view?usp=sharing -> https://drive.google.com/uc?export=download&id=<ID>
+      - https://drive.google.com/open?id=<ID> -> https://drive.google.com/uc?export=download&id=<ID>
+    If the URL doesn't match known patterns, return it unchanged.
+    """
+    if not url or not isinstance(url, str):
+        return url
+    # file/d/<id>/view or file/d/<id>
+    m = re.search(r"/file/d/([a-zA-Z0-9_-]+)", url)
+    if m:
+        file_id = m.group(1)
+        return f"https://drive.google.com/uc?export=download&id={file_id}"
+    # open?id=<id>
+    m2 = re.search(r"[?&]id=([a-zA-Z0-9_-]+)", url)
+    if m2 and ("drive.google.com" in url or "docs.google.com" in url):
+        file_id = m2.group(1)
+        return f"https://drive.google.com/uc?export=download&id={file_id}"
+    return url
+
+
+def _get_duration_ms_for_file(path: str) -> int | None:
+    """Return duration in milliseconds for an audio file using mutagen, or None if unknown."""
+    try:
+        m = MutagenFile(path)
+        if not m:
+            return None
+        length = getattr(m.info, 'length', None)
+        if length is None:
+            return None
+        return int(length * 1000)
+    except Exception:
+        return None
+
+async def _fetch_and_save_external_assets(track_id: int, audio_url: str | None, cover_url: str | None):
+    """Background task: download external audio and cover concurrently and update DB to serve local files when possible."""
+    db = SessionLocal()
+    try:
+        tasks = []
+        audio_path = None
+        cover_path = None
+        if audio_url:
+            # attempt to convert Drive share links to direct download
+            audio_url_s = _convert_drive_url(audio_url)
+            parsed = audio_url_s.split('?')[0]
+            ext = os.path.splitext(parsed)[1] or '.mp3'
+            audio_path = f'app/static/audio/{track_id}{ext}'
+            tasks.append(_download_to_file(audio_url_s, audio_path))
+        if cover_url:
+            cover_url_s = _convert_drive_url(cover_url)
+            parsed = cover_url_s.split('?')[0]
+            ext = os.path.splitext(parsed)[1] or '.jpg'
+            cover_path = f'app/static/covers/{track_id}{ext}'
+            tasks.append(_download_to_file(cover_url_s, cover_path))
+
+        if tasks:
+            try:
+                await asyncio.gather(*tasks)
+            except Exception:
+                # don't raise from background task
+                pass
+
+        # after download, detect obvious HTML (Drive confirmation pages) and remove them
+        def _looks_like_html(path: str) -> bool:
+            try:
+                with open(path, 'rb') as fh:
+                    head = fh.read(512)
+                    if not head:
+                        return False
+                    try:
+                        s = head.decode('utf-8', errors='ignore').lower()
+                    except Exception:
+                        return False
+                    if '<html' in s or '<!doctype' in s or 'content-type: text/html' in s:
+                        return True
+            except Exception:
+                return False
+            return False
+
+        # update track record to point to local served paths when files exist; detect duration
+        tr = db.query(Track).filter(Track.id == track_id).first()
+        if not tr:
+            return
+        if audio_path and os.path.exists(audio_path):
+            # if the downloaded file is actually HTML (eg drive landing page), remove it and do not set preview
+            if _looks_like_html(audio_path):
+                try:
+                    os.remove(audio_path)
+                except Exception:
+                    pass
+            else:
+                tr.preview_url = f'/tracks/{track_id}/preview'
+                # detect duration and update if missing
+                try:
+                    dur = _get_duration_ms_for_file(audio_path)
+                    if dur and (not tr.duration_ms or tr.duration_ms == 0):
+                        tr.duration_ms = dur
+                except Exception:
+                    pass
+        if cover_path and os.path.exists(cover_path):
+            if _looks_like_html(cover_path):
+                try:
+                    os.remove(cover_path)
+                except Exception:
+                    pass
+            else:
+                _, cext = os.path.splitext(cover_path)
+                tr.cover_url = f'/static/covers/{track_id}{cext}'
+        db.add(tr)
+        db.commit()
+        db.refresh(tr)
+    finally:
+        db.close()
+
+
+@router.post('/{track_id}/refetch-assets')
+def refetch_track_assets(track_id: int, payload: dict | None = None, background_tasks: BackgroundTasks = None, db: Session = Depends(get_db), current_user: User = Depends(_get_current_user)):
+    """Trigger background re-fetch of external audio/cover URLs for a track.
+
+    Useful when initial background download saved an HTML confirmation page (eg Google Drive). This will
+    schedule the same background task used on create, converting Drive links when possible.
+    """
+    tr = db.query(Track).filter(Track.id == track_id).first()
+    if not tr:
+        raise HTTPException(status_code=404, detail='Track not found')
+    # payload can contain explicit audio_url / cover_url to override what's stored
+    audio_url = None
+    cover_url = None
+    if payload:
+        audio_url = payload.get('audio_url')
+        cover_url = payload.get('cover_url')
+
+    # if payload not provided or fields empty, try to use stored external URLs (must start with http)
+    if not audio_url and tr.preview_url and isinstance(tr.preview_url, str) and tr.preview_url.startswith('http'):
+        audio_url = tr.preview_url
+    if not cover_url and tr.cover_url and isinstance(tr.cover_url, str) and tr.cover_url.startswith('http'):
+        cover_url = tr.cover_url
+
+    if not audio_url and not cover_url:
+        raise HTTPException(status_code=400, detail='No external audio/cover URLs to refetch. Provide audio_url and/or cover_url in request body.')
+
+    # schedule background re-download (convert Drive links inside the worker)
+    if background_tasks is None:
+        # FastAPI should inject BackgroundTasks, but be defensive in unit tests
+        raise HTTPException(status_code=500, detail='Background tasks unavailable')
+    background_tasks.add_task(_fetch_and_save_external_assets, tr.id, audio_url, cover_url)
+    return {'status': 'scheduled'}

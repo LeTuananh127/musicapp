@@ -5,10 +5,17 @@ import '../application/player_providers.dart';
 // import 'track_error_log_screen.dart'; // removed menu, no longer used
 // queue_screen not used in compact mode
 
-class MiniPlayerBar extends ConsumerWidget {
+class MiniPlayerBar extends ConsumerStatefulWidget {
   const MiniPlayerBar({super.key});
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MiniPlayerBar> createState() => _MiniPlayerBarState();
+}
+
+class _MiniPlayerBarState extends ConsumerState<MiniPlayerBar> {
+  double? _dragValue;
+
+  @override
+  Widget build(BuildContext context) {
     final state = ref.watch(playerControllerProvider);
     final ctrl = ref.read(playerControllerProvider.notifier);
     final track = state.current;
@@ -57,16 +64,33 @@ class MiniPlayerBar extends ConsumerWidget {
                               trackHeight: 3,
                               minThumbSeparation: 0,
                             ),
-                            child: Slider(
-                              value: pos.inMilliseconds
-                                  .clamp(0, dur.inMilliseconds)
-                                  .toDouble(),
-                              max: dur.inMilliseconds == 0
-                                  ? 1
-                                  : dur.inMilliseconds.toDouble(),
-                              onChanged: (v) =>
-                                  ctrl.seek(Duration(milliseconds: v.toInt())),
-                            ),
+                            child: SliderTheme(
+                                data: SliderTheme.of(context).copyWith(
+                                  trackHeight: 3,
+                                  minThumbSeparation: 0,
+                                ),
+                                child: Slider(
+                                  value: (_dragValue ?? pos.inMilliseconds)
+                                      .clamp(0, dur.inMilliseconds)
+                                      .toDouble(),
+                                  max: dur.inMilliseconds == 0
+                                      ? 1
+                                      : dur.inMilliseconds.toDouble(),
+                                  onChangeStart: (_) {
+                                    // start dragging; keep local drag value
+                                    setState(() => _dragValue = pos.inMilliseconds.toDouble());
+                                  },
+                                  onChanged: (v) {
+                                    setState(() => _dragValue = v);
+                                  },
+                                  onChangeEnd: (v) async {
+                                    setState(() => _dragValue = null);
+                                    try {
+                                      await ctrl.seek(Duration(milliseconds: v.toInt()));
+                                    } catch (_) {}
+                                  },
+                                ),
+                              ),
                           ),
                         ),
                         const SizedBox(width: 4),
